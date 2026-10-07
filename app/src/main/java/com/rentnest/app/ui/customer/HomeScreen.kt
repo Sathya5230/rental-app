@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -115,13 +117,14 @@ fun HomeScreen(
             }
             item { PromoBanner { onOpenSearch(3L) } }
             item {
-                LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                LazyRow(Modifier.carouselGestureExclusion(), contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(state.categories, key = { it.id }) { c -> CategoryTile(c) { onOpenSearch(c.id) } }
                 }
             }
             item {
                 SectionHeader("Popular near you", action = "See all", onAction = { onOpenSearch(null) })
-                LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                val popularState = rememberLazyListState()
+                LazyRow(Modifier.carouselGestureExclusion(), state = popularState, flingBehavior = rememberSnapFlingBehavior(popularState), contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(state.popular, key = { it.item.id }) { s ->
                         ItemCard(s, { onOpenItem(s.item.id) }, Modifier.width(200.dp), sharedKey = "art-${s.item.id}") { viewModel.toggleFavourite(s.item.id) }
                     }
@@ -129,13 +132,14 @@ fun HomeScreen(
             }
             item {
                 SectionHeader("Top providers")
-                LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                LazyRow(Modifier.carouselGestureExclusion(), contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(state.topProviders, key = { it.id }) { p -> ProviderChip(p) { onOpenProvider(p.id) } }
                 }
             }
             if (state.recent.isNotEmpty()) item {
                 SectionHeader("Recently viewed")
-                LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                val recentState = rememberLazyListState()
+                LazyRow(Modifier.carouselGestureExclusion(), state = recentState, flingBehavior = rememberSnapFlingBehavior(recentState), contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(state.recent, key = { it.item.id }) { s -> ItemCard(s, { onOpenItem(s.item.id) }, Modifier.width(200.dp)) }
                 }
             }

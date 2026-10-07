@@ -117,7 +117,7 @@ fun ItemDetailsContent(state: ItemDetailsUiState, onBack: () -> Unit, onSelectDa
             item {
                 Box {
                     val pager = rememberPagerState(pageCount = { item.photos.size.coerceAtLeast(1) })
-                    HorizontalPager(pager, Modifier.fillMaxWidth().height(320.dp).sharedArt(sharedKey)) { page ->
+                    HorizontalPager(pager, Modifier.fillMaxWidth().height(320.dp).carouselGestureExclusion(120.dp).sharedArt(sharedKey)) { page ->
                         ItemArt(item.photos.getOrNull(page).orEmpty(), Modifier.fillMaxSize(), iconSize = 96.dp)
                     }
                     Row(Modifier.align(Alignment.BottomCenter).padding(12.dp)) {

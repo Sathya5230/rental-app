@@ -24,6 +24,7 @@ import androidx.lifecycle.viewModelScope
 import com.rentnest.app.domain.model.AppMode
 import com.rentnest.app.domain.repository.SessionRepository
 import com.rentnest.app.ui.components.PrimaryButton
+import com.rentnest.app.ui.components.carouselGestureExclusion
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -53,7 +54,7 @@ fun OnboardingScreen(onFinished: () -> Unit, viewModel: SessionActionsViewModel 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = finish) { Text("Skip") }
             }
-            HorizontalPager(pager, Modifier.weight(1f)) { page ->
+            HorizontalPager(pager, Modifier.weight(1f).carouselGestureExclusion(160.dp)) { page ->
                 val s = slides[page]
                 Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Hero(s.icon)
