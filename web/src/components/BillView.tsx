@@ -16,9 +16,9 @@ import { useToast } from './Toast';
 const SHOP_NAME = 'RentNest Store';
 
 /** Loads what a bill shows. With [customerId], only that customer's bookings are found. */
-export function useBill(bookingId: number, customerId?: number) {
+export function useBill(bookingId: number | null, customerId?: number) {
   return useLive(async s => {
-    const booking = await s.bookings.booking(bookingId);
+    const booking = bookingId == null ? undefined : await s.bookings.booking(bookingId);
     if (!booking || (customerId != null && booking.customerId !== customerId)) return { booking: undefined };
     const [item, units, customer, admin] = await Promise.all([
       s.catalog.item(booking.itemId), s.inventory.unitsForItem(booking.itemId), s.catalog.user(booking.customerId), s.catalog.user(ADMIN_USER_ID),

@@ -30,3 +30,9 @@ export const paths = {
   handover: (id: number, isReturn: boolean) => `/admin/handover/${id}${isReturn ? '?return=1' : ''}`,
   itemEditor: (id?: number) => (id ? `/admin/items/${id}` : '/admin/items/new'),
 };
+
+/** A route id segment as a positive integer, or null for anything else ("abc", "12abc", "0"). */
+export function parseId(raw: string | undefined): number | null {
+  if (!raw || !/^[1-9]\d{0,14}$/.test(raw)) return null;
+  return Number(raw);
+}

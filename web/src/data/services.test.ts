@@ -5,7 +5,8 @@ import { bookingCode } from '@/domain/format/dates';
 import { DEMO_USER_ID } from '@/domain/models';
 import { isOverdue } from '@/domain/rules/lateFees';
 import { fitWithin } from '@/lib/photos';
-import { singleFlight } from '@/lib/singleFlight';
+import { parseId } from '@/lib/routes';
+import { exclusive, singleFlight } from '@/lib/singleFlight';
 import { smsLink } from './overdueReminders';
 import { bootstrap, createServices } from './services';
 import { memoryStore } from './sessionRepository';
@@ -65,4 +66,22 @@ it('fits photos within the max edge', () => {
   expect(fitWithin(4000, 3000)).toEqual({ width: 1600, height: 1200 });
   expect(fitWithin(800, 600)).toEqual({ width: 800, height: 600 });
   expect(fitWithin(1000, 3000)).toEqual({ width: 533, height: 1600 });
+});
+
+it('an exclusive action ignores taps while running but runs again once done', async () => {
+  let calls = 0;
+  const run = exclusive(async (): Promise<Outcome<number>> => ({ ok: true, value: ++calls }));
+  await Promise.all([run(), run()]);
+  expect(calls).toBe(1);
+  expect(await run()).toEqual({ ok: true, value: 2 });
+});
+
+it('parses route ids strictly', () => {
+  expect(parseId('12')).toBe(12);
+  expect(parseId('abc')).toBeNull();
+  expect(parseId('12abc')).toBeNull();
+  expect(parseId('0')).toBeNull();
+  expect(parseId('-3')).toBeNull();
+  expect(parseId('1.5')).toBeNull();
+  expect(parseId(undefined)).toBeNull();
 });

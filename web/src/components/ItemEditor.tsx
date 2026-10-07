@@ -10,7 +10,7 @@ import { formatFull } from '@/domain/format/dates';
 import { fileToPhotoKey } from '@/lib/photos';
 import { formToDraft, type ItemForm } from '@/lib/itemForm';
 import { paths } from '@/lib/routes';
-import { singleFlight } from '@/lib/singleFlight';
+import { exclusive } from '@/lib/singleFlight';
 import { Button, IconButton } from './Button';
 import { Dialog } from './Dialog';
 import { Field, inputClass, TextInput } from './Field';
@@ -43,7 +43,9 @@ export function ItemEditor({ itemId, initial }: { itemId: number; initial: ItemF
           {isNew ? 'Units (save first)' : `Units (${units?.length ?? 0})`}
         </button>
       </div>
-      {tab === 'DETAILS' ? <DetailsForm itemId={itemId} initial={initial} /> : <UnitsTab itemId={itemId} units={units ?? []} />}
+      {/* Both panels stay mounted, so switching tabs keeps unsaved edits. */}
+      <div hidden={tab !== 'DETAILS'}><DetailsForm itemId={itemId} initial={initial} /></div>
+      {!isNew && <div hidden={tab !== 'UNITS'}><UnitsTab itemId={itemId} units={units ?? []} /></div>}
     </div>
   );
 }
@@ -68,7 +70,8 @@ function DetailsForm({ itemId, initial }: { itemId: number; initial: ItemForm })
   const [importing, setImporting] = useState(false);
   const [newCategory, setNewCategory] = useState(false);
   const [newVendor, setNewVendor] = useState(false);
-  const [save] = useState(() => singleFlight((form: ItemForm, providerId: number) => catalog.saveItem(formToDraft(form, itemId, providerId))));
+  // Exclusive, not single-flight: the form stays open, so every later save must run too.
+  const [save] = useState(() => exclusive((form: ItemForm, providerId: number) => catalog.saveItem(formToDraft(form, itemId, providerId))));
   const update = (patch: Partial<ItemForm>) => setF(prev => ({ ...prev, ...patch }));
   const bad = (field: ItemField) => errors.has(field);
 

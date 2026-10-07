@@ -15,7 +15,7 @@ import { bookingCode, formatDays, formatRange, formatShort } from '@/domain/form
 import { formatMoney, parseRupees } from '@/domain/format/money';
 import { bookingRange, UNIT_CONDITIONS, type Booking, type Item, type ItemUnit, type UnitCondition } from '@/domain/models';
 import { daysLate, lateFee, settle } from '@/domain/rules/lateFees';
-import { paths } from '@/lib/routes';
+import { paths, parseId } from '@/lib/routes';
 import { singleFlight } from '@/lib/singleFlight';
 
 const PICKUP_CHECKS = ['Customer ID verified', 'Advance collected', 'All accessories included', 'Condition photos taken'];
@@ -25,11 +25,11 @@ const rupees = (v: string) => parseRupees(v.trim() === '' ? '0' : v);
 const titleCase = (s: string) => s.charAt(0) + s.slice(1).toLowerCase();
 
 export default function Handover() {
-  const id = Number(useParams<{ id: string }>().id);
+  const id = parseId(useParams<{ id: string }>().id);
   const isReturn = useSearchParams().get('return') === '1';
   const title = isReturn ? 'Return & close rental' : 'Check out';
   const data = useLive(async s => {
-    const booking = await s.bookings.booking(id);
+    const booking = id == null ? undefined : await s.bookings.booking(id);
     if (!booking) return { booking: undefined };
     const [item, units, customer] = await Promise.all([s.catalog.item(booking.itemId), s.inventory.unitsForItem(booking.itemId), s.catalog.user(booking.customerId)]);
     return { booking, item, unit: units.find(u => u.id === booking.unitId), customer: customer?.name ?? '', today: s.time.today() };
@@ -37,7 +37,7 @@ export default function Handover() {
 
   if (!data) return <Screen title={title}><SkeletonList /></Screen>;
   if (!data.booking) return <Screen title={title}><EmptyState icon={CircleAlert} title="Booking not found" body="We couldn't find that anymore." /></Screen>;
-  return <HandoverForm key={id} isReturn={isReturn} title={title} {...data} booking={data.booking} />;
+  return <HandoverForm key={data.booking.id} isReturn={isReturn} title={title} {...data} booking={data.booking} />;
 }
 
 function HandoverForm({ isReturn, title, booking: b, item, unit, customer, today }: {

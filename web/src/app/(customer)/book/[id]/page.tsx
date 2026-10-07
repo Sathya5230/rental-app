@@ -15,14 +15,15 @@ import { formatMoney } from '@/domain/format/money';
 import { isBookable, unavailableDates } from '@/domain/rules/availability';
 import { quoteItem } from '@/domain/rules/pricing';
 import { nextSelection, selectionRange, type Selection } from '@/lib/booking';
-import { paths } from '@/lib/routes';
+import { paths, parseId } from '@/lib/routes';
 
 export default function BookingDates() {
-  const id = Number(useParams<{ id: string }>().id);
+  const id = parseId(useParams<{ id: string }>().id);
   const router = useRouter();
   const [selection, setSelection] = useState<Selection>(null);
   const data = useLive(async s => {
     const today = s.time.today();
+    if (id == null) return { item: undefined, units: [], bookings: [], today, unavailable: new Set<string>() };
     const [item, units, bookings] = await Promise.all([s.catalog.item(id), s.inventory.unitsForItem(id), s.bookings.bookingsForItem(id)]);
     return { item, units, bookings, today, unavailable: unavailableDates({ start: today, end: addDays(today, 365) }, units, bookings) };
   }, [id]);
@@ -53,7 +54,7 @@ export default function BookingDates() {
         )}
         {!range && <p className="text-on-surface-variant">Tap a start date, then an end date. Tap the same day twice for a one-day rental.</p>}
       </div>
-      <Button className="w-full" disabled={!breakdown} onClick={() => range && router.push(paths.checkout(id, range.start, range.end))}>Continue</Button>
+      <Button className="w-full" disabled={!breakdown} onClick={() => range && router.push(paths.checkout(item.id, range.start, range.end))}>Continue</Button>
     </div>
   );
 

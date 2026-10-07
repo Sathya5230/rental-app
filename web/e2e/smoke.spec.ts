@@ -73,3 +73,42 @@ test('deep links survive reloads and unknown ids show not found', async ({ page 
   await page.goto('/item/9999');
   await expect(page.getByRole('heading', { name: 'Item not found' })).toBeVisible();
 });
+
+test('malformed and unknown ids show a not-found state instead of crashing', async ({ page }) => {
+  await signIn(page);
+  await page.goto('/item/abc');
+  await expect(page.getByRole('heading', { name: 'Item not found' })).toBeVisible();
+  await page.goto('/item/12abc');
+  await expect(page.getByRole('heading', { name: 'Item not found' })).toBeVisible();
+  await page.goto('/booking-success/9999');
+  await expect(page.getByRole('heading', { name: 'Booking not found' })).toBeVisible();
+  await page.goto('/admin-login');
+  await unlockAdmin(page);
+  await expect(page).toHaveURL(/\/admin$/);
+  await page.goto('/admin/bill/abc');
+  await expect(page.getByText("We couldn't find that anymore.")).toBeVisible();
+  await page.goto('/admin/handover/abc');
+  await expect(page.getByRole('heading', { name: 'Booking not found' })).toBeVisible();
+});
+
+test('the item editor saves every change and keeps edits across tabs', async ({ page }) => {
+  await signIn(page);
+  await page.goto('/admin-login');
+  await unlockAdmin(page);
+  await expect(page).toHaveURL(/\/admin$/);
+  await page.goto('/admin/items/12');
+  const daily = page.getByLabel('Per day ₹', { exact: true });
+  await daily.fill('180');
+  await page.getByRole('tab', { name: /Units/ }).click();
+  await page.getByRole('tab', { name: 'Details' }).click();
+  await expect(daily).toHaveValue('180');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  const saved = page.getByRole('status').getByText('Changes saved');
+  await expect(saved).toBeVisible();
+  await expect(saved).toBeHidden({ timeout: 6_000 }); // so the next check sees the second save's toast
+  await daily.fill('200');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(saved).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel('Per day ₹', { exact: true })).toHaveValue('200');
+});

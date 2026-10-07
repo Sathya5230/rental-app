@@ -4,10 +4,10 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { BillActions, BillView, useBill } from '@/components/BillView';
 import { Button } from '@/components/Button';
 import { Screen } from '@/components/Screen';
-import { paths } from '@/lib/routes';
+import { paths, parseId } from '@/lib/routes';
 
 export default function AdminBill() {
-  const id = Number(useParams<{ id: string }>().id);
+  const id = parseId(useParams<{ id: string }>().id);
   const isReturn = useSearchParams().get('return') === '1';
   const router = useRouter();
   const data = useBill(id);

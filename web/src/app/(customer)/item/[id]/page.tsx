@@ -14,19 +14,19 @@ import { formatFull } from '@/domain/format/dates';
 import { formatMoney } from '@/domain/format/money';
 import { DEMO_USER_ID } from '@/domain/models';
 import { unavailableDates, usableUnits } from '@/domain/rules/availability';
-import { paths } from '@/lib/routes';
+import { paths, parseId } from '@/lib/routes';
 
 export default function ItemDetails() {
-  const id = Number(useParams<{ id: string }>().id);
+  const id = parseId(useParams<{ id: string }>().id);
   const { catalog, session } = useServices();
   const router = useRouter();
   const goBack = () => (window.history.length > 1 ? router.back() : router.push(paths.home));
 
-  useEffect(() => { if (Number.isFinite(id)) session.recordView(id); }, [id, session]);
+  useEffect(() => { if (id != null) session.recordView(id); }, [id, session]);
 
   const state = useLive(async s => {
-    const item = await s.catalog.item(id);
-    if (!item) return { item: undefined };
+    const item = id == null ? undefined : await s.catalog.item(id);
+    if (!item || id == null) return { item: undefined };
     const today = s.time.today();
     const [providers, users, categories, units, bookings, reviews, ratings, favourites] = await Promise.all([
       s.catalog.providers(), s.catalog.users(), s.catalog.categories(), s.inventory.unitsForItem(id), s.bookings.bookingsForItem(id),
@@ -65,7 +65,7 @@ export default function ItemDetails() {
         <PhotoPager photos={item.photos} />
         <div className="absolute inset-x-0 top-0 flex justify-between p-2">
           <IconButton label="Back" onClick={goBack} className="bg-surface/90"><ArrowLeft size={22} /></IconButton>
-          <FavouriteButton active={state.isFavourite} onToggle={() => catalog.toggleFavourite(DEMO_USER_ID, id)} className="size-12" />
+          <FavouriteButton active={state.isFavourite} onToggle={() => catalog.toggleFavourite(DEMO_USER_ID, item.id)} className="size-12" />
         </div>
       </div>
 
@@ -123,7 +123,7 @@ export default function ItemDetails() {
             <p className="text-xs text-on-surface-variant">{stockText}</p>
           </div>
           {!state.isOwnListing && (
-            <Button icon={<CalendarDays size={18} aria-hidden />} disabled={state.usableUnits === 0} onClick={() => router.push(paths.book(id))}>Select dates</Button>
+            <Button icon={<CalendarDays size={18} aria-hidden />} disabled={state.usableUnits === 0} onClick={() => router.push(paths.book(item.id))}>Select dates</Button>
           )}
         </div>
       </div>
