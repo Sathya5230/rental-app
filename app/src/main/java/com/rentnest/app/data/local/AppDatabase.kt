@@ -8,8 +8,9 @@ import androidx.room.TypeConverters
     entities = [
         UserEntity::class, ProviderEntity::class, CategoryEntity::class, ItemEntity::class, ItemUnitEntity::class,
         BookingEntity::class, HandoverEntity::class, ReviewEntity::class, FavouriteEntity::class, NotificationEntity::class,
+        VendorEntity::class, AuditEntity::class,
     ],
-    version = 1,
+    version = 3,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)

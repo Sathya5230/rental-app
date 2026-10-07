@@ -22,6 +22,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.rentnest.app.domain.model.AppMode
+import com.rentnest.app.domain.DEMO_USER_ID
+import com.rentnest.app.domain.repository.CatalogRepository
 import com.rentnest.app.domain.repository.SessionRepository
 import com.rentnest.app.ui.components.PrimaryButton
 import com.rentnest.app.ui.components.carouselGestureExclusion
@@ -30,9 +32,17 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
-class SessionActionsViewModel @Inject constructor(private val session: SessionRepository) : ViewModel() {
+class SessionActionsViewModel @Inject constructor(
+    private val session: SessionRepository,
+    private val catalog: CatalogRepository,
+) : ViewModel() {
     fun completeOnboarding(done: () -> Unit) = viewModelScope.launch { session.completeOnboarding(); done() }
-    fun logIn(done: () -> Unit) = viewModelScope.launch { session.logIn(); done() }
+    /** Saves [phone] as the customer's number, used for rental requests and overdue SMS. */
+    fun logIn(phone: String, done: () -> Unit) = viewModelScope.launch {
+        catalog.updatePhone(DEMO_USER_ID, phone)
+        session.logIn()
+        done()
+    }
     fun chooseMode(mode: AppMode, done: () -> Unit) = viewModelScope.launch { session.chooseMode(mode); done() }
 }
 
@@ -41,7 +51,7 @@ private data class Slide(val icon: ImageVector, val title: String, val body: Str
 private val slides = listOf(
     Slide(Icons.Rounded.TravelExplore, "Rent anything, nearby", "Cameras, tools, camping kits and more from trusted local providers."),
     Slide(Icons.Rounded.EventAvailable, "Book in seconds", "Live availability, simple date picking and transparent pricing. No surprises."),
-    Slide(Icons.Rounded.Storefront, "Earn from your gear", "List equipment, track every unit and manage bookings from one dashboard."),
+    Slide(Icons.Rounded.Storefront, "Approved by the store", "Your request goes to the store. Once it's approved, pay the advance at pickup and you're set."),
 )
 
 @Composable

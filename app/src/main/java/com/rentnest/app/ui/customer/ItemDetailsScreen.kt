@@ -145,7 +145,7 @@ fun ItemDetailsContent(state: ItemDetailsUiState, onBack: () -> Unit, onSelectDa
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         PriceBox("Per day", item.dailyRate, Modifier.weight(1f))
                         PriceBox("Per week", item.weeklyRate, Modifier.weight(1f))
-                        PriceBox("Deposit", item.deposit, Modifier.weight(1f))
+                        PriceBox("Advance", item.deposit, Modifier.weight(1f))
                     }
                     state.provider?.let { p ->
                         Card(shape = MaterialTheme.shapes.medium, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {

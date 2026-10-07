@@ -27,9 +27,9 @@ class DemoDataManager @Inject constructor(
         val s = SeedData.build(time.today(), time.nowMillis())
         val dao = db.seedDao()
         db.withTransaction {
-            dao.users(s.users); dao.providers(s.providers); dao.categories(s.categories)
+            dao.users(s.users); dao.providers(s.providers); dao.categories(s.categories); dao.vendors(s.vendors)
             dao.items(s.items); dao.units(s.units); dao.bookings(s.bookings)
-            dao.reviews(s.reviews); dao.favourites(s.favourites); dao.notifications(s.notifications)
+            dao.reviews(s.reviews); dao.favourites(s.favourites); dao.notifications(s.notifications); dao.audits(s.audits)
         }
     }
 }

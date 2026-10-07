@@ -29,6 +29,8 @@ import com.rentnest.app.domain.model.*
 import com.rentnest.app.domain.repository.BookingRepository
 import com.rentnest.app.domain.repository.CatalogRepository
 import com.rentnest.app.domain.rules.BookingStateMachine
+import com.rentnest.app.domain.rules.LateFees
+import com.rentnest.app.domain.time.TimeProvider
 import com.rentnest.app.ui.components.*
 import com.rentnest.app.ui.model.ObserveCatalog
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -45,7 +47,7 @@ fun rentalTabOf(status: BookingStatus) = when (status) {
     else -> RentalTab.PAST
 }
 
-data class RentalUi(val booking: Booking, val item: Item?, val providerName: String)
+data class RentalUi(val booking: Booking, val item: Item?, val providerName: String, val daysLate: Int = 0, val lateFee: Long = 0)
 
 data class RentalsUiState(val loading: Boolean = true, val byTab: Map<RentalTab, List<RentalUi>> = emptyMap(), val message: String? = null)
 
@@ -53,12 +55,22 @@ data class RentalsUiState(val loading: Boolean = true, val byTab: Map<RentalTab,
 class RentalsViewModel @Inject constructor(
     catalog: CatalogRepository,
     private val bookings: BookingRepository,
+    time: TimeProvider,
 ) : ViewModel() {
     private val message = MutableStateFlow<String?>(null)
     val state = combine(bookings.bookingsForCustomer(DEMO_USER_ID), catalog.allItems(), catalog.providers(), message) { list, items, providers, msg ->
         val itemMap = items.associateBy { it.id }
         val providerNames = providers.associate { it.id to it.shopName }
-        val rows = list.map { b -> val item = itemMap[b.itemId]; RentalUi(b, item, item?.let { providerNames[it.providerId] }.orEmpty()) }
+        val today = time.today()
+        val rows = list.map { b ->
+            val item = itemMap[b.itemId]
+            val overdue = LateFees.isOverdue(b, today)
+            RentalUi(
+                b, item, item?.let { providerNames[it.providerId] }.orEmpty(),
+                daysLate = if (overdue) LateFees.daysLate(b.endDate, today) else 0,
+                lateFee = if (overdue) LateFees.fee(b.endDate, today, item?.dailyRate ?: 0) else b.lateFee,
+            )
+        }
         val grouped = rows.groupBy { rentalTabOf(it.booking.status) }.mapValues { (tab, v) ->
             if (tab == RentalTab.PAST) v.sortedByDescending { it.booking.endDate } else v.sortedBy { it.booking.startDate }
         }
@@ -78,7 +90,7 @@ class RentalsViewModel @Inject constructor(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RentalsScreen(onOpenItem: (Long) -> Unit, viewModel: RentalsViewModel = hiltViewModel()) {
+fun RentalsScreen(onOpenItem: (Long) -> Unit, onViewBill: (Long) -> Unit, viewModel: RentalsViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var tab by rememberSaveable { mutableStateOf<RentalTab?>(null) }
@@ -102,7 +114,7 @@ fun RentalsScreen(onOpenItem: (Long) -> Unit, viewModel: RentalsViewModel = hilt
             else if (rows.isEmpty()) EmptyState(Icons.Rounded.EventBusy, "Nothing here yet", "Your ${current.label.lowercase()} rentals will show up here.")
             else LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(rows, key = { it.booking.id }) { r ->
-                    RentalCard(r, onOpen = { onOpenItem(r.booking.itemId) }, onCancel = { cancelId = r.booking.id }, onReview = { reviewFor = r })
+                    RentalCard(r, onOpen = { onOpenItem(r.booking.itemId) }, onCancel = { cancelId = r.booking.id }, onReview = { reviewFor = r }, onViewBill = { onViewBill(r.booking.id) })
                 }
             }
         }
@@ -111,7 +123,7 @@ fun RentalsScreen(onOpenItem: (Long) -> Unit, viewModel: RentalsViewModel = hilt
         AlertDialog(
             onDismissRequest = { cancelId = null },
             title = { Text("Cancel this booking?") },
-            text = { Text("The provider will be notified and your deposit won't be charged.") },
+            text = { Text("The store will be notified. Nothing has been charged.") },
             confirmButton = { TextButton(onClick = { viewModel.cancel(id); cancelId = null }) { Text("Cancel booking") } },
             dismissButton = { TextButton(onClick = { cancelId = null }) { Text("Keep it") } },
         )
@@ -120,7 +132,7 @@ fun RentalsScreen(onOpenItem: (Long) -> Unit, viewModel: RentalsViewModel = hilt
 }
 
 @Composable
-private fun RentalCard(r: RentalUi, onOpen: () -> Unit, onCancel: () -> Unit, onReview: () -> Unit) {
+private fun RentalCard(r: RentalUi, onOpen: () -> Unit, onCancel: () -> Unit, onReview: () -> Unit, onViewBill: () -> Unit) {
     val b = r.booking
     Card(onClick = onOpen, shape = MaterialTheme.shapes.medium, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -135,18 +147,52 @@ private fun RentalCard(r: RentalUi, onOpen: () -> Unit, onCancel: () -> Unit, on
                 StatusChip(b.status)
             }
             StatusTimeline(b.status)
-            if (b.damageFee > 0) Text("Damage fee: ${MoneyFormatter.format(b.damageFee)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            when (b.status) {
+                BookingStatus.REQUESTED -> Note(Icons.Rounded.HourglassTop, "Waiting for the store to approve. You can pick it up only after approval.")
+                BookingStatus.ACCEPTED -> Note(Icons.Rounded.Payments, "Approved! Pay ${MoneyFormatter.format(b.total)} at pickup on ${DateFormats.short(b.startDate)}, including the ${MoneyFormatter.format(b.deposit)} refundable advance.")
+                BookingStatus.ACTIVE -> if (r.daysLate > 0) Surface(color = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer, shape = MaterialTheme.shapes.small) {
+                    Row(Modifier.padding(10.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Warning, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Overdue by ${DateFormats.days(r.daysLate)}. Late fee so far ${MoneyFormatter.format(r.lateFee)}, taken from your advance. Please return it today.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                } else Note(Icons.Rounded.EventAvailable, "Return by ${DateFormats.full(b.endDate)}. Late days cost ${MoneyFormatter.format(r.item?.dailyRate ?: 0)} each.")
+                else -> {}
+            }
+            val extraCharges = b.lateFee + b.damageFee + b.dropTransportFee + b.cleaningFee
+            if (b.status == BookingStatus.RETURNED && extraCharges > 0) Text(
+                listOfNotNull(
+                    b.lateFee.takeIf { it > 0 }?.let { "Late fee ${MoneyFormatter.format(it)}" },
+                    b.damageFee.takeIf { it > 0 }?.let { "Damage fee ${MoneyFormatter.format(it)}" },
+                    b.dropTransportFee.takeIf { it > 0 }?.let { "Transport fee ${MoneyFormatter.format(it)}" },
+                    b.cleaningFee.takeIf { it > 0 }?.let { "Cleaning fee ${MoneyFormatter.format(it)}" },
+                ).joinToString(" · ") + " deducted from your advance",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error,
+            )
             val canCancel = BookingStateMachine.canCancel(b)
             val canReview = BookingStateMachine.canReview(b)
-            if (canCancel || canReview || b.reviewed) {
+            if (canCancel || canReview || b.reviewed || b.status == BookingStatus.RETURNED) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(DateFormats.bookingCode(b.id), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    if (b.status == BookingStatus.RETURNED) OutlinedButton(onClick = onViewBill, shape = MaterialTheme.shapes.small) { Text("View bill") }
                     if (canCancel) OutlinedButton(onClick = onCancel, shape = MaterialTheme.shapes.small) { Text("Cancel") }
                     if (canReview) FilledTonalButton(onClick = onReview, shape = MaterialTheme.shapes.small) { Icon(Icons.Rounded.Star, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Rate rental") }
                     if (b.reviewed) Text("Reviewed ✓", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun Note(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
+    Row(verticalAlignment = Alignment.Top) {
+        Icon(icon, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(8.dp))
+        Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

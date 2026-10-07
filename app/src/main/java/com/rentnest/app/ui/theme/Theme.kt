@@ -88,7 +88,7 @@ fun RentNestTheme(mode: AppMode = AppMode.CUSTOMER, themePref: ThemePref = Theme
     val dark = themePref.isDark()
     val accent = when (mode) {
         AppMode.CUSTOMER -> if (dark) CustomerDark else CustomerLight
-        AppMode.PROVIDER -> if (dark) ProviderDark else ProviderLight
+        AppMode.ADMIN -> if (dark) ProviderDark else ProviderLight
     }
     val target = scheme(accent, dark)
     val spec = tween<Color>(450)

@@ -13,6 +13,9 @@ sealed interface DomainError {
     data object UnitBusy : DomainError
     data object NotReviewable : DomainError
     data object InvalidRating : DomainError
+    data object InvalidPhone : DomainError
+    data object InvalidName : DomainError
+    data object NotOverdue : DomainError
     data class InvalidTransition(val from: BookingStatus, val action: BookingAction) : DomainError
     data class ValidationFailed(val fields: Set<ItemField>) : DomainError
 }
@@ -26,6 +29,9 @@ fun DomainError.message(): String = when (this) {
     DomainError.UnitBusy -> "This unit has an active or upcoming booking. Return or reassign it first."
     DomainError.NotReviewable -> "This rental can't be reviewed."
     DomainError.InvalidRating -> "Choose a rating from 1 to 5 stars."
+    DomainError.InvalidPhone -> "Enter a valid 10-digit mobile number."
+    DomainError.InvalidName -> "Please enter a name."
+    DomainError.NotOverdue -> "This rental isn't overdue."
     is DomainError.InvalidTransition -> "That action isn't available for this booking anymore."
     is DomainError.ValidationFailed -> "Please fix the highlighted fields."
 }

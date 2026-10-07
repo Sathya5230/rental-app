@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 @Serializable object ChooseModeRoute
 @Serializable object NotificationsRoute
 @Serializable object ProfileRoute
+@Serializable object AdminLoginRoute
 
 // Customer
 @Serializable object HomeRoute
@@ -18,10 +19,12 @@ import kotlinx.serialization.Serializable
 @Serializable data class CheckoutRoute(val itemId: Long, val startEpochDay: Long, val endEpochDay: Long)
 @Serializable data class BookingSuccessRoute(val bookingId: Long)
 
-// Provider
+// Admin
 @Serializable object DashboardRoute
 @Serializable object InventoryRoute
 @Serializable object ProviderBookingsRoute
 @Serializable object EarningsRoute
 @Serializable data class ItemEditorRoute(val itemId: Long = 0L)
 @Serializable data class HandoverRoute(val bookingId: Long, val isReturn: Boolean)
+@Serializable data class BillRoute(val bookingId: Long, val isReturn: Boolean)
+@Serializable object AuditRoute

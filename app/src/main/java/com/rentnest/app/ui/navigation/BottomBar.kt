@@ -38,7 +38,7 @@ val ProviderTabs = listOf(
     TopLevelDestination("Inventory", Icons.Outlined.Inventory2, Icons.Rounded.Inventory2, InventoryRoute) { it.hasRoute<InventoryRoute>() },
     TopLevelDestination("Bookings", Icons.Outlined.CalendarMonth, Icons.Rounded.CalendarMonth, ProviderBookingsRoute) { it.hasRoute<ProviderBookingsRoute>() },
     TopLevelDestination("Earnings", Icons.Outlined.Payments, Icons.Rounded.Payments, EarningsRoute) { it.hasRoute<EarningsRoute>() },
-    TopLevelDestination("Profile", Icons.Outlined.Person, Icons.Rounded.Person, ProfileRoute) { it.hasRoute<ProfileRoute>() },
+    TopLevelDestination("Admin", Icons.Outlined.AdminPanelSettings, Icons.Rounded.AdminPanelSettings, ProfileRoute) { it.hasRoute<ProfileRoute>() },
 )
 
 fun tabsFor(mode: AppMode) = if (mode == AppMode.CUSTOMER) CustomerTabs else ProviderTabs

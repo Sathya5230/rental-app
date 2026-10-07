@@ -2,6 +2,7 @@ package com.rentnest.app.ui.common
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Logout
@@ -10,24 +11,30 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import com.rentnest.app.data.repository.DataStoreSessionRepository
 import com.rentnest.app.data.seed.DemoDataManager
+import com.rentnest.app.domain.ADMIN_USER_ID
 import com.rentnest.app.domain.DEMO_USER_ID
 import com.rentnest.app.domain.model.*
 import com.rentnest.app.domain.repository.CatalogRepository
 import com.rentnest.app.domain.repository.SessionRepository
 import com.rentnest.app.ui.components.Avatar
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class ProfileUiState(val user: User? = null, val provider: Provider? = null, val session: SessionState = SessionState(), val resetting: Boolean = false)
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
     catalog: CatalogRepository,
@@ -35,10 +42,14 @@ class ProfileViewModel @Inject constructor(
     private val demo: DemoDataManager,
 ) : ViewModel() {
     private val resetting = MutableStateFlow(false)
-    val state = combine(catalog.user(DEMO_USER_ID), catalog.providerForUser(DEMO_USER_ID), session.session, resetting, ::ProfileUiState)
+    private val user = session.session.map { it.mode }.distinctUntilChanged().flatMapLatest { mode ->
+        catalog.user(if (mode == AppMode.ADMIN) ADMIN_USER_ID else DEMO_USER_ID)
+    }
+    val state = combine(user, catalog.providerForUser(ADMIN_USER_ID), session.session, resetting, ::ProfileUiState)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ProfileUiState())
 
-    fun switchMode(mode: AppMode, done: (AppMode) -> Unit) = viewModelScope.launch { session.chooseMode(mode); done(mode) }
+    fun exitAdmin(done: () -> Unit) = viewModelScope.launch { session.lockAdmin(); done() }
+    fun changePin(current: String, new: String, done: (Boolean) -> Unit) = viewModelScope.launch { done(session.changeAdminPin(current, new)) }
     fun setTheme(pref: ThemePref) = viewModelScope.launch { session.setTheme(pref) }
     fun logOut(done: () -> Unit) = viewModelScope.launch { session.logOut(); done() }
     fun reset(done: () -> Unit) = viewModelScope.launch {
@@ -51,12 +62,14 @@ class ProfileViewModel @Inject constructor(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProfileScreen(onModeSwitched: (AppMode) -> Unit, onLoggedOut: () -> Unit, viewModel: ProfileViewModel = hiltViewModel()) {
+fun ProfileScreen(onAdminSignIn: () -> Unit, onAdminExited: () -> Unit, onLoggedOut: () -> Unit, viewModel: ProfileViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var confirmReset by remember { mutableStateOf(false) }
-    Scaffold(topBar = { TopAppBar(title = { Text("Profile") }) }, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+    var changingPin by remember { mutableStateOf(false) }
+    val isAdmin = state.session.mode == AppMode.ADMIN
+    Scaffold(topBar = { TopAppBar(title = { Text(if (isAdmin) "Admin" else "Profile") }) }, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Avatar(state.user?.name.orEmpty(), size = 64.dp)
@@ -66,27 +79,31 @@ fun ProfileScreen(onModeSwitched: (AppMode) -> Unit, onLoggedOut: () -> Unit, vi
                     Text(state.user?.phone.orEmpty(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            if (state.session.mode == AppMode.PROVIDER) state.provider?.let { p ->
-                Card(shape = MaterialTheme.shapes.medium, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                    Row(Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.Storefront, null)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(p.shopName, style = MaterialTheme.typography.titleMedium)
-                            Text("${p.locationText} · ★ ${p.rating} (${p.reviewCount})", style = MaterialTheme.typography.bodySmall)
+            if (isAdmin) {
+                state.provider?.let { p ->
+                    Card(shape = MaterialTheme.shapes.medium, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                        Row(Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Storefront, null)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(p.shopName, style = MaterialTheme.typography.titleMedium)
+                                Text("${p.locationText} · ★ ${p.rating} (${p.reviewCount})", style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 }
-            }
-            SettingCard("Mode", "Switch between renting and running your shop.") {
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    AppMode.entries.forEachIndexed { i, mode ->
-                        SegmentedButton(
-                            selected = state.session.mode == mode,
-                            onClick = { if (state.session.mode != mode) viewModel.switchMode(mode, onModeSwitched) },
-                            shape = SegmentedButtonDefaults.itemShape(i, AppMode.entries.size),
-                            icon = { Icon(if (mode == AppMode.CUSTOMER) Icons.Rounded.Search else Icons.Rounded.Storefront, null, Modifier.size(18.dp)) },
-                        ) { Text(if (mode == AppMode.CUSTOMER) "Customer" else "Provider") }
+                SettingCard("Admin security", "Only people with the PIN can open the admin dashboard. It locks again when the app restarts.") {
+                    OutlinedButton(onClick = { changingPin = true }, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Rounded.Password, null); Spacer(Modifier.width(8.dp)); Text("Change admin PIN")
+                    }
+                    Button(onClick = { viewModel.exitAdmin(onAdminExited) }, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Rounded.Lock, null); Spacer(Modifier.width(8.dp)); Text("Lock & exit admin")
+                    }
+                }
+            } else {
+                SettingCard("Store admin", "Manage inventory, approve requests and handle returns.") {
+                    OutlinedButton(onClick = onAdminSignIn, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Rounded.AdminPanelSettings, null); Spacer(Modifier.width(8.dp)); Text("Open admin dashboard")
                     }
                 }
             }
@@ -101,12 +118,12 @@ fun ProfileScreen(onModeSwitched: (AppMode) -> Unit, onLoggedOut: () -> Unit, vi
                     }
                 }
             }
-            SettingCard("Demo", "Restore all sample items, bookings and notifications.") {
+            if (isAdmin) SettingCard("Demo", "Restore all sample items, bookings and notifications.") {
                 OutlinedButton(onClick = { confirmReset = true }, enabled = !state.resetting, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Rounded.RestartAlt, null); Spacer(Modifier.width(8.dp)); Text(if (state.resetting) "Restoring…" else "Reset demo data")
                 }
             }
-            TextButton(onClick = { viewModel.logOut(onLoggedOut) }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+            if (!isAdmin) TextButton(onClick = { viewModel.logOut(onLoggedOut) }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
                 Icon(Icons.AutoMirrored.Rounded.Logout, null); Spacer(Modifier.width(8.dp)); Text("Log out")
             }
             Spacer(Modifier.height(16.dp))
@@ -126,6 +143,40 @@ fun ProfileScreen(onModeSwitched: (AppMode) -> Unit, onLoggedOut: () -> Unit, vi
             dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Cancel") } },
         )
     }
+    if (changingPin) {
+        ChangePinDialog(onDismiss = { changingPin = false }) { current, new ->
+            viewModel.changePin(current, new) { ok ->
+                if (ok) changingPin = false
+                scope.launch { snackbar.showSnackbar(if (ok) "Admin PIN changed" else "Current PIN is wrong") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChangePinDialog(onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
+    var current by remember { mutableStateOf("") }
+    var new by remember { mutableStateOf("") }
+    var confirm by remember { mutableStateOf("") }
+    val valid = DataStoreSessionRepository.isValidPin(new) && new == confirm && current.isNotEmpty()
+    @Composable fun pinField(label: String, value: String, error: Boolean = false, onChange: (String) -> Unit) = OutlinedTextField(
+        value, { onChange(it.filter(Char::isDigit).take(6)) }, label = { Text(label) }, singleLine = true, isError = error,
+        visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth(),
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Change admin PIN") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                pinField("Current PIN", current) { current = it }
+                pinField("New PIN (4–6 digits)", new) { new = it }
+                pinField("Repeat new PIN", confirm, error = confirm.isNotEmpty() && confirm != new) { confirm = it }
+            }
+        },
+        confirmButton = { TextButton(enabled = valid, onClick = { onSave(current, new) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable

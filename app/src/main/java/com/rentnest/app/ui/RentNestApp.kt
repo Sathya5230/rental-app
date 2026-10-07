@@ -50,7 +50,7 @@ private fun AppScaffold(state: AppUiState.Ready) {
     val mode = state.session.mode
     val tabs = tabsFor(mode)
     val showBar = tabs.any { destination.isTab(it) }
-    val badges = if (mode == AppMode.PROVIDER) mapOf("Bookings" to state.pendingRequests) else emptyMap()
+    val badges = if (mode == AppMode.ADMIN) mapOf("Bookings" to state.pendingRequests) else emptyMap()
     Scaffold(
         contentWindowInsets = WindowInsets(0),
         bottomBar = {

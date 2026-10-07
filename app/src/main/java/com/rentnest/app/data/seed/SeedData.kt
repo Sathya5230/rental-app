@@ -2,6 +2,7 @@ package com.rentnest.app.data.seed
 
 import com.rentnest.app.data.local.*
 import com.rentnest.app.data.repository.UnitTagger
+import com.rentnest.app.domain.ADMIN_USER_ID
 import com.rentnest.app.domain.DEMO_USER_ID
 import com.rentnest.app.domain.format.DateFormats
 import com.rentnest.app.domain.model.*
@@ -19,9 +20,14 @@ data class SeedBundle(
     val reviews: List<ReviewEntity>,
     val favourites: List<FavouriteEntity>,
     val notifications: List<NotificationEntity>,
+    val vendors: List<VendorEntity>,
+    val audits: List<AuditEntity>,
 )
 
-/** Deterministic demo data. Booking dates are relative to [today] so the dashboard always looks alive. */
+/**
+ * Deterministic demo data: one store run by the admin, stocking its own items plus some borrowed from vendors.
+ * Booking dates are relative to [today] so the dashboard always looks alive.
+ */
 object SeedData {
     private const val DAY = 86_400_000L
 
@@ -36,14 +42,17 @@ object SeedData {
             UserEntity(7, "Ishaan Verma", "+91 98450 12007", false),
             UserEntity(8, "Ananya Singh", "+91 98450 12008", false),
             UserEntity(9, "Vikram Nair", "+91 98450 12009", false),
+            UserEntity(ADMIN_USER_ID, "Admin", "+91 98450 10000", true),
         )
         val providers = listOf(
-            ProviderEntity(1, 1, "Arjun's Gear Hub", 4.8, 126, "Indiranagar, Bengaluru", LocalDate.of(2023, 3, 12)),
-            ProviderEntity(2, 2, "LensLoop Rentals", 4.9, 312, "Koramangala, Bengaluru", LocalDate.of(2022, 7, 1)),
-            ProviderEntity(3, 3, "ToolShed Co.", 4.6, 98, "HSR Layout, Bengaluru", LocalDate.of(2023, 11, 20)),
-            ProviderEntity(4, 4, "WildTrail Outfitters", 4.7, 154, "Whitefield, Bengaluru", LocalDate.of(2022, 12, 5)),
-            ProviderEntity(5, 5, "PartyPal Events", 4.5, 77, "Jayanagar, Bengaluru", LocalDate.of(2024, 2, 14)),
-            ProviderEntity(6, 6, "RideOn Rentals", 4.8, 201, "Malleshwaram, Bengaluru", LocalDate.of(2023, 6, 30)),
+            ProviderEntity(1, ADMIN_USER_ID, "RentNest Store", 4.8, 968, "Indiranagar, Bengaluru", LocalDate.of(2023, 3, 12)),
+        )
+        val vendors = listOf(
+            VendorEntity(1, "LensLoop Rentals", "+91 98450 22001"),
+            VendorEntity(2, "ToolShed Co.", "+91 98450 22002"),
+            VendorEntity(3, "WildTrail Outfitters", "+91 98450 22003"),
+            VendorEntity(4, "PartyPal Events", "+91 98450 22004"),
+            VendorEntity(5, "RideOn Rentals", "+91 98450 22005"),
         )
         val categories = SEED_CATEGORIES.mapIndexed { i, (name, key) -> CategoryEntity(i + 1L, name, key) }
 
@@ -51,11 +60,18 @@ object SeedData {
             val id = index + 1L
             val categoryId = index / 5 + 1L
             val key = SEED_CATEGORIES[index / 5].second
+            // Every fourth item is borrowed from a vendor, at 40% of its daily rate.
+            val borrowed = index % 4 == 3
             ItemEntity(
-                id = id, providerId = index % 6 + 1L, categoryId = categoryId, title = t.title,
+                id = id, providerId = 1, categoryId = categoryId, title = t.title,
                 description = t.description, photos = (0 until 3).map { "$key:${(index + it) % 4}" },
                 dailyRate = t.daily * 100, weeklyRate = t.weekly * 100, deposit = t.deposit * 100,
                 specs = t.specs.toMap(), lowStockThreshold = 1, isActive = true,
+                unitValue = t.daily * 60 * 100,
+                ownership = if (borrowed) Ownership.BORROWED else Ownership.OWNED,
+                vendorId = if (borrowed) index / 8 % vendors.size + 1L else null,
+                vendorCostPerDay = if (borrowed) t.daily * 40 else 0,
+                vendorReturnBy = if (borrowed) today.plusDays(2L + index) else null,
             )
         }
 
@@ -77,7 +93,7 @@ object SeedData {
 
         data class B(val item: Long, val customer: Long, val from: Long, val to: Long, val status: BookingStatus, val reviewed: Boolean = false, val damage: Long = 0)
         val specs = listOf(
-            // The demo user renting from other providers
+            // The demo customer's rentals
             B(2, 1, -20, -17, BookingStatus.RETURNED, reviewed = true),
             B(3, 1, -10, -8, BookingStatus.RETURNED),
             B(4, 1, -2, 2, BookingStatus.ACTIVE),
@@ -85,7 +101,7 @@ object SeedData {
             B(8, 1, 6, 8, BookingStatus.REQUESTED),
             B(9, 1, -5, -4, BookingStatus.CANCELLED),
             B(10, 1, 1, 2, BookingStatus.DECLINED),
-            // Customers renting the demo user's shop (provider 1 owns items 1, 7, 13, 19, 25, 31, 37)
+            // Other customers
             B(1, 7, 2, 4, BookingStatus.REQUESTED),
             B(7, 8, 1, 3, BookingStatus.REQUESTED),
             B(13, 9, 0, 2, BookingStatus.ACCEPTED),
@@ -99,11 +115,12 @@ object SeedData {
             B(19, 8, -60, -58, BookingStatus.RETURNED),
             B(25, 9, -5, -3, BookingStatus.RETURNED),
             B(31, 8, -100, -96, BookingStatus.RETURNED),
-            // Marketplace activity elsewhere
-            B(2, 8, -40, -38, BookingStatus.RETURNED),
+                        B(2, 8, -40, -38, BookingStatus.RETURNED),
             B(16, 9, -15, -14, BookingStatus.RETURNED),
             B(21, 7, -1, 1, BookingStatus.ACTIVE),
             B(27, 8, 4, 6, BookingStatus.ACCEPTED),
+            // Overdue: should have come back two days ago
+            B(33, 9, -6, -2, BookingStatus.ACTIVE),
         )
         val bookings = specs.mapIndexed { i, s ->
             val item = items[(s.item - 1).toInt()]
@@ -115,6 +132,7 @@ object SeedData {
                 customerId = s.customer, startDate = range.start, endDate = range.end, status = s.status,
                 subtotal = quote.subtotal, deposit = quote.deposit, damageFee = s.damage * 100,
                 createdAt = now - (i + 1) * 3 * 3_600_000L, reviewed = s.reviewed,
+                contactPhone = users.first { it.id == s.customer }.phone,
             )
         }
 
@@ -139,20 +157,30 @@ object SeedData {
         fun title(id: Long) = items[(id - 1).toInt()].title
         fun booking(item: Long, status: BookingStatus) = bookings.first { it.itemId == item && it.status == status }
         val notifications = listOf(
-            notification(Audience.PROVIDER, "New booking request", "Ishaan Verma wants ${title(1)} · ${DateFormats.range(DateRange(booking(1, BookingStatus.REQUESTED).startDate, booking(1, BookingStatus.REQUESTED).endDate))}", booking(1, BookingStatus.REQUESTED).id, false, now - 3_600_000),
-            notification(Audience.PROVIDER, "New booking request", "Ananya Singh wants ${title(7)}", booking(7, BookingStatus.REQUESTED).id, false, now - 7_200_000),
-            notification(Audience.PROVIDER, "Return due today", "${title(19)} is due back from Ishaan Verma today.", booking(19, BookingStatus.ACTIVE).id, false, now - 10_800_000),
-            notification(Audience.PROVIDER, "New 5★ review", "${title(1)}: \"Exactly as described.\"", null, true, now - 2 * DAY),
-            notification(Audience.CUSTOMER, "Booking confirmed", "${title(5)} is reserved for you. Pickup in 3 days.", booking(5, BookingStatus.ACCEPTED).id, false, now - 5_400_000),
+            notification(Audience.ADMIN, "New rental request", "Ishaan Verma wants ${title(1)} · ${DateFormats.range(DateRange(booking(1, BookingStatus.REQUESTED).startDate, booking(1, BookingStatus.REQUESTED).endDate))}", booking(1, BookingStatus.REQUESTED).id, false, now - 3_600_000),
+            notification(Audience.ADMIN, "New rental request", "Ananya Singh wants ${title(7)}", booking(7, BookingStatus.REQUESTED).id, false, now - 7_200_000),
+            notification(Audience.ADMIN, "New rental request", "Arjun Mehta wants ${title(8)}", booking(8, BookingStatus.REQUESTED).id, false, now - 9_000_000),
+            notification(Audience.ADMIN, "Return due today", "${title(19)} is due back from Ishaan Verma today.", booking(19, BookingStatus.ACTIVE).id, false, now - 10_800_000),
+            notification(Audience.ADMIN, "New 5★ review", "${title(1)}: \"Exactly as described.\"", null, true, now - 2 * DAY),
+            notification(Audience.CUSTOMER, "Request approved", "${title(5)} is reserved for you. Pickup in 3 days.", booking(5, BookingStatus.ACCEPTED).id, false, now - 5_400_000),
             notification(Audience.CUSTOMER, "Rental started", "Enjoy your ${title(4)}! Return by ${DateFormats.short(today.plusDays(2))}.", booking(4, BookingStatus.ACTIVE).id, true, now - 2 * DAY),
             notification(Audience.CUSTOMER, "How was it?", "Rate your ${title(3)} rental to help other renters.", booking(3, BookingStatus.RETURNED).id, false, now - 8 * DAY),
         )
 
         val favourites = listOf(4L, 11L, 21L, 26L).map { FavouriteEntity(DEMO_USER_ID, it) }
-        return SeedBundle(users, providers, categories, items, units, bookings, reviews, favourites, notifications)
+
+        // Last week's stock count of the first 20 items: one unit of item 12 couldn't be found.
+        val auditAt = now - 7 * DAY
+        val audits = items.take(20).map { item ->
+            val held = units.count { it.itemId == item.id && it.status != UnitStatus.RETIRED }
+            val missing = if (item.id == 12L) 1 else 0
+            AuditEntity(itemId = item.id, timestamp = auditAt, expected = held, counted = held - missing,
+                notes = if (missing > 0) "One unit missing from shelf B" else "")
+        }
+        return SeedBundle(users, providers, categories, items, units, bookings, reviews, favourites, notifications, vendors, audits)
     }
 
     private fun notification(audience: Audience, title: String, body: String, bookingId: Long?, read: Boolean, at: Long) =
-        NotificationEntity(recipientUserId = DEMO_USER_ID, audience = audience, title = title, body = body,
-            bookingId = bookingId, isRead = read, createdAt = at)
+        NotificationEntity(recipientUserId = if (audience == Audience.ADMIN) ADMIN_USER_ID else DEMO_USER_ID, audience = audience,
+            title = title, body = body, bookingId = bookingId, isRead = read, createdAt = at)
 }

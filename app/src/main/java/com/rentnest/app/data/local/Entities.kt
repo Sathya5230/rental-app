@@ -25,6 +25,17 @@ data class ItemEntity(
     val providerId: Long, val categoryId: Long, val title: String, val description: String,
     val photos: List<String>, val dailyRate: Long, val weeklyRate: Long, val deposit: Long,
     val specs: Map<String, String>, val lowStockThreshold: Int, val isActive: Boolean,
+    val unitValue: Long = 0, val ownership: Ownership = Ownership.OWNED, val vendorId: Long? = null,
+    val vendorCostPerDay: Long = 0, val vendorReturnBy: LocalDate? = null,
+)
+
+@Entity(tableName = "vendors")
+data class VendorEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val name: String, val phone: String)
+
+@Entity(tableName = "audits", indices = [Index("itemId")])
+data class AuditEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val itemId: Long, val timestamp: Long, val expected: Int, val counted: Int, val notes: String,
 )
 
 @Entity(tableName = "item_units", indices = [Index("itemId")])
@@ -39,6 +50,8 @@ data class BookingEntity(
     val itemId: Long, val unitId: Long?, val customerId: Long,
     val startDate: LocalDate, val endDate: LocalDate, val status: BookingStatus,
     val subtotal: Long, val deposit: Long, val damageFee: Long, val createdAt: Long, val reviewed: Boolean,
+    val contactPhone: String = "", val lateFee: Long = 0, val overdueSmsAt: Long? = null,
+    val pickupTransportFee: Long = 0, val dropTransportFee: Long = 0, val cleaningFee: Long = 0,
 )
 
 @Entity(tableName = "handovers", indices = [Index("bookingId")])

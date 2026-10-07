@@ -27,6 +27,7 @@ import com.rentnest.app.domain.message
 import com.rentnest.app.domain.model.*
 import com.rentnest.app.domain.repository.BookingRepository
 import com.rentnest.app.domain.rules.AvailabilityCalculator
+import com.rentnest.app.domain.rules.LateFees
 import com.rentnest.app.domain.time.TimeProvider
 import com.rentnest.app.ui.components.*
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -43,7 +44,11 @@ fun providerTabOf(s: BookingStatus) = when (s) {
     else -> ProviderTab.COMPLETED
 }
 
-data class ProviderBookingUi(val booking: Booking, val item: Item?, val customerName: String, val freeUnits: List<ItemUnit>, val unitTag: String?, val isOverdue: Boolean)
+data class ProviderBookingUi(
+    val booking: Booking, val item: Item?, val customerName: String, val freeUnits: List<ItemUnit>, val unitTag: String?, val isOverdue: Boolean,
+    /** Late fee accrued so far for an overdue rental, or charged on a closed one. */
+    val lateFee: Long = 0,
+)
 
 data class ProviderBookingsUiState(val loading: Boolean = true, val byTab: Map<ProviderTab, List<ProviderBookingUi>> = emptyMap(), val message: String? = null)
 
@@ -64,7 +69,9 @@ class ProviderBookingsViewModel @Inject constructor(
             val free = if (b.status == BookingStatus.REQUESTED) {
                 AvailabilityCalculator.freeUnitsFor(b.range, unitsByItem[b.itemId].orEmpty(), shop.bookings.filter { it.itemId == b.itemId && it.id != b.id })
             } else emptyList()
-            ProviderBookingUi(b, items[b.itemId], shop.userNames[b.customerId] ?: "Customer", free, b.unitId?.let { tags[it] }, b.status == BookingStatus.ACTIVE && b.endDate.isBefore(today))
+            val overdue = LateFees.isOverdue(b, today)
+            val late = if (overdue) LateFees.fee(b.endDate, today, items[b.itemId]?.dailyRate ?: 0) else b.lateFee
+            ProviderBookingUi(b, items[b.itemId], shop.userNames[b.customerId] ?: "Customer", free, b.unitId?.let { tags[it] }, overdue, late)
         }
         val grouped = rows.groupBy { providerTabOf(it.booking.status) }.mapValues { (t, v) ->
             if (t == ProviderTab.COMPLETED) v.sortedByDescending { it.booking.endDate } else v.sortedBy { it.booking.startDate }
@@ -73,7 +80,7 @@ class ProviderBookingsViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ProviderBookingsUiState())
 
     fun accept(bookingId: Long, unitId: Long) = viewModelScope.launch {
-        message.value = when (val r = bookings.accept(bookingId, unitId)) { is Outcome.Success -> "Booking confirmed. The customer has been notified."; is Outcome.Failure -> r.error.message() }
+        message.value = when (val r = bookings.accept(bookingId, unitId)) { is Outcome.Success -> "Request approved. The customer has been notified."; is Outcome.Failure -> r.error.message() }
     }
     fun decline(bookingId: Long) = viewModelScope.launch {
         message.value = when (val r = bookings.decline(bookingId)) { is Outcome.Success -> "Request declined"; is Outcome.Failure -> r.error.message() }
@@ -83,7 +90,7 @@ class ProviderBookingsViewModel @Inject constructor(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProviderBookingsScreen(onHandover: (Long, Boolean) -> Unit, viewModel: ProviderBookingsViewModel = hiltViewModel()) {
+fun ProviderBookingsScreen(onHandover: (Long, Boolean) -> Unit, onViewBill: (Long, Boolean) -> Unit, viewModel: ProviderBookingsViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.message) { state.message?.let { snackbar.showSnackbar(it); viewModel.messageShown() } }
@@ -100,18 +107,22 @@ fun ProviderBookingsScreen(onHandover: (Long, Boolean) -> Unit, viewModel: Provi
             when {
                 state.loading -> SkeletonList()
                 rows.isEmpty() -> EmptyState(Icons.Rounded.Inbox, "Nothing here", when (tab) {
-                    ProviderTab.REQUESTS -> "New booking requests from customers appear here."
+                    ProviderTab.REQUESTS -> "Rental requests waiting for your approval appear here."
                     ProviderTab.UPCOMING -> "Confirmed bookings waiting for pickup."
                     ProviderTab.ACTIVE -> "Items currently out with customers."
-                    ProviderTab.COMPLETED -> "Finished, declined and cancelled bookings."
+                    ProviderTab.COMPLETED -> "Closed, declined and cancelled rentals."
                 })
                 else -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(rows, key = { it.booking.id }) { r ->
                         when (tab) {
                             ProviderTab.REQUESTS -> RequestCard(r, onAccept = { viewModel.accept(r.booking.id, it) }, onDecline = { viewModel.decline(r.booking.id) })
                             ProviderTab.UPCOMING -> BookingCard(r) { Button({ onHandover(r.booking.id, false) }, shape = MaterialTheme.shapes.small) { Icon(Icons.Rounded.Outbox, null); Spacer(Modifier.width(6.dp)); Text("Check out") } }
-                            ProviderTab.ACTIVE -> BookingCard(r) { Button({ onHandover(r.booking.id, true) }, shape = MaterialTheme.shapes.small) { Icon(Icons.Rounded.MoveToInbox, null); Spacer(Modifier.width(6.dp)); Text("Process return") } }
-                            ProviderTab.COMPLETED -> BookingCard(r) {}
+                            ProviderTab.ACTIVE -> BookingCard(r) { Button({ onHandover(r.booking.id, true) }, shape = MaterialTheme.shapes.small) { Icon(Icons.Rounded.MoveToInbox, null); Spacer(Modifier.width(6.dp)); Text("Return & close") } }
+                            ProviderTab.COMPLETED -> BookingCard(r) {
+                                if (r.booking.status == BookingStatus.RETURNED) OutlinedButton({ onViewBill(r.booking.id, true) }, shape = MaterialTheme.shapes.small) {
+                                    Icon(Icons.Rounded.Receipt, null); Spacer(Modifier.width(6.dp)); Text("View bill")
+                                }
+                            }
                         }
                     }
                 }
@@ -128,7 +139,8 @@ private fun BookingHeader(r: ProviderBookingUi) {
         Column(Modifier.weight(1f)) {
             Text(r.item?.title ?: "Item", style = MaterialTheme.typography.titleSmall)
             Text("${r.customerName} · ${DateFormats.range(r.booking.range)} (${DateFormats.days(r.booking.range.days)})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("${MoneyFormatter.format(r.booking.subtotal)} + ${MoneyFormatter.format(r.booking.deposit)} deposit", style = MaterialTheme.typography.labelLarge)
+            if (r.booking.contactPhone.isNotBlank()) Text(r.booking.contactPhone, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("${MoneyFormatter.format(r.booking.subtotal)} + ${MoneyFormatter.format(r.booking.deposit)} advance", style = MaterialTheme.typography.labelLarge)
         }
         if (r.isOverdue) StatusChipOverdue() else StatusChip(r.booking.status)
     }
@@ -150,8 +162,16 @@ private fun BookingCard(r: ProviderBookingUi, action: @Composable RowScope.() ->
             BookingHeader(r)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    listOfNotNull(DateFormats.bookingCode(r.booking.id), r.unitTag?.let { "Unit $it" }, r.booking.damageFee.takeIf { it > 0 }?.let { "Damage ${MoneyFormatter.format(it)}" }).joinToString(" · "),
-                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f),
+                    listOfNotNull(
+                        DateFormats.bookingCode(r.booking.id), r.unitTag?.let { "Unit $it" },
+                        r.lateFee.takeIf { it > 0 }?.let { "Late fee ${MoneyFormatter.format(it)}" },
+                        r.booking.damageFee.takeIf { it > 0 }?.let { "Damage ${MoneyFormatter.format(it)}" },
+                        r.booking.dropTransportFee.takeIf { it > 0 }?.let { "Transport ${MoneyFormatter.format(it)}" },
+                        r.booking.cleaningFee.takeIf { it > 0 }?.let { "Cleaning ${MoneyFormatter.format(it)}" },
+                    ).joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (r.isOverdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
                 )
                 action()
             }
@@ -177,7 +197,7 @@ fun RequestCard(r: ProviderBookingUi, onAccept: (Long) -> Unit, onDecline: () ->
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton({ confirmDecline = true }, Modifier.weight(1f), shape = MaterialTheme.shapes.small) { Text("Decline") }
-                Button({ picking = true }, Modifier.weight(1f), enabled = r.freeUnits.isNotEmpty(), shape = MaterialTheme.shapes.small) { Text("Accept") }
+                Button({ picking = true }, Modifier.weight(1f), enabled = r.freeUnits.isNotEmpty(), shape = MaterialTheme.shapes.small) { Text("Approve") }
             }
         }
     }
@@ -188,7 +208,7 @@ fun RequestCard(r: ProviderBookingUi, onAccept: (Long) -> Unit, onDecline: () ->
             title = { Text("Assign a unit") },
             text = {
                 Column {
-                    Text("Pick which ${r.item?.title ?: "unit"} goes to ${r.customerName}.", style = MaterialTheme.typography.bodyMedium)
+                    Text("Approve and pick which ${r.item?.title ?: "unit"} goes to ${r.customerName}.", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(8.dp))
                     r.freeUnits.forEach { u ->
                         Row(

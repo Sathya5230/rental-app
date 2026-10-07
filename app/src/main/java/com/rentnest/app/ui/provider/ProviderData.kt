@@ -1,6 +1,6 @@
 package com.rentnest.app.ui.provider
 
-import com.rentnest.app.domain.DEMO_USER_ID
+import com.rentnest.app.domain.ADMIN_USER_ID
 import com.rentnest.app.domain.model.*
 import com.rentnest.app.domain.repository.BookingRepository
 import com.rentnest.app.domain.repository.CatalogRepository
@@ -9,7 +9,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import javax.inject.Inject
 
-/** Everything about the demo user's shop, as one stream. */
+/** Everything about the admin's store, as one stream. */
 data class ShopSnapshot(
     val provider: Provider,
     val items: List<Item>,
@@ -25,7 +25,7 @@ class ObserveShop @Inject constructor(
     private val bookings: BookingRepository,
 ) {
     @OptIn(ExperimentalCoroutinesApi::class)
-    operator fun invoke(): Flow<ShopSnapshot?> = catalog.providerForUser(DEMO_USER_ID).flatMapLatest { p ->
+    operator fun invoke(): Flow<ShopSnapshot?> = catalog.providerForUser(ADMIN_USER_ID).flatMapLatest { p ->
         if (p == null) flowOf(null)
         else combine(
             catalog.itemsByProvider(p.id), inventory.unitsForProvider(p.id), bookings.bookingsForProvider(p.id),

@@ -2,6 +2,7 @@ package com.rentnest.app.data.repository
 
 import androidx.room.withTransaction
 import com.rentnest.app.data.local.AppDatabase
+import com.rentnest.app.data.local.AuditEntity
 import com.rentnest.app.data.local.toDomain
 import com.rentnest.app.data.local.toEntity
 import com.rentnest.app.domain.DomainError
@@ -9,6 +10,7 @@ import com.rentnest.app.domain.Outcome
 import com.rentnest.app.domain.model.BookingStatus
 import com.rentnest.app.domain.model.ItemUnit
 import com.rentnest.app.domain.model.UnitStatus
+import com.rentnest.app.domain.repository.AuditEntry
 import com.rentnest.app.domain.repository.InventoryRepository
 import com.rentnest.app.domain.time.TimeProvider
 import kotlinx.coroutines.flow.map
@@ -40,5 +42,16 @@ class RoomInventoryRepository @Inject constructor(
         }
         dao.updateUnit(unit.toEntity())
         return Outcome.Success(unit)
+    }
+
+    override fun audits() = dao.audits().map { l -> l.map { it.toDomain() } }
+
+    override suspend fun submitAudit(entries: List<AuditEntry>): Outcome<Int> {
+        if (entries.isEmpty()) return Outcome.Success(0)
+        val at = time.nowMillis()
+        dao.insertAudits(entries.map {
+            AuditEntity(itemId = it.itemId, timestamp = at, expected = it.expected, counted = it.counted.coerceAtLeast(0), notes = it.notes.trim())
+        })
+        return Outcome.Success(entries.size)
     }
 }

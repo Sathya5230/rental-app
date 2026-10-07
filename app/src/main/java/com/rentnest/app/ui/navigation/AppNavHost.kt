@@ -14,6 +14,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.rentnest.app.domain.model.AppMode
 import com.rentnest.app.domain.model.SessionState
+import com.rentnest.app.ui.common.AdminLoginScreen
 import com.rentnest.app.ui.common.ChooseModeScreen
 import com.rentnest.app.ui.common.LoginScreen
 import com.rentnest.app.ui.common.NotificationsScreen
@@ -65,10 +66,12 @@ fun AppNavHost(navController: NavHostController, session: SessionState, modifier
             ) {
                 screen<OnboardingRoute> { OnboardingScreen(onFinished = { nav.navigate(LoginRoute) { popUpTo(OnboardingRoute) { inclusive = true } } }) }
                 screen<LoginRoute> { LoginScreen(onLoggedIn = { nav.navigate(ChooseModeRoute) { popUpTo(LoginRoute) { inclusive = true } } }) }
-                screen<ChooseModeRoute> { ChooseModeScreen(onModeChosen = { nav.enterMode(it) }) }
+                screen<ChooseModeRoute> { ChooseModeScreen(onModeChosen = { nav.enterMode(it) }, onAdminSignIn = { nav.navigate(AdminLoginRoute) }) }
+                screen<AdminLoginRoute> { AdminLoginScreen(onBack = { nav.popBackStack() }, onUnlocked = { nav.enterMode(AppMode.ADMIN) }) }
                 screen<ProfileRoute> {
                     ProfileScreen(
-                        onModeSwitched = { nav.enterMode(it) },
+                        onAdminSignIn = { nav.navigate(AdminLoginRoute) },
+                        onAdminExited = { nav.enterMode(AppMode.CUSTOMER) },
                         onLoggedOut = { nav.navigate(LoginRoute) { popUpTo(nav.graph.id) { inclusive = true } } },
                     )
                 }
@@ -84,7 +87,6 @@ fun AppNavHost(navController: NavHostController, session: SessionState, modifier
                     HomeScreen(
                         onOpenItem = { nav.navigate(ItemDetailsRoute(it)) },
                         onOpenSearch = { nav.navigate(SearchRoute(it ?: -1L)) },
-                        onOpenProvider = { nav.navigate(SearchRoute(providerId = it)) },
                         onOpenNotifications = { nav.navigate(NotificationsRoute) },
                     )
                 }
@@ -107,32 +109,51 @@ fun AppNavHost(navController: NavHostController, session: SessionState, modifier
                 screen<BookingSuccessRoute> {
                     BookingSuccessScreen(
                         onViewRentals = { nav.navigateToTab(RentalsRoute, AppMode.CUSTOMER) },
-                        onHome = { nav.navigateToTab(HomeRoute, AppMode.CUSTOMER) },
+                        onHome = { nav.popBackStack(HomeRoute, inclusive = false) },
                     )
                 }
-                screen<RentalsRoute> { RentalsScreen(onOpenItem = { nav.navigate(ItemDetailsRoute(it)) }) }
+                screen<RentalsRoute> {
+                    RentalsScreen(
+                        onOpenItem = { nav.navigate(ItemDetailsRoute(it)) },
+                        onViewBill = { id -> nav.navigate(BillRoute(id, isReturn = true)) },
+                    )
+                }
                 screen<SavedRoute> {
                     SavedScreen(onOpenItem = { nav.navigate(ItemDetailsRoute(it)) }, onExplore = { nav.navigateToTab(SearchRoute(), AppMode.CUSTOMER) })
                 }
 
-                // Provider
+                // Admin
                 screen<DashboardRoute> {
                     DashboardScreen(
                         onOpenNotifications = { nav.navigate(NotificationsRoute) },
                         onAddItem = { nav.navigate(ItemEditorRoute()) },
                         onOpenItem = { nav.navigate(ItemEditorRoute(it)) },
-                        onOpenBookings = { nav.navigateToTab(ProviderBookingsRoute, AppMode.PROVIDER) },
+                        onOpenBookings = { nav.navigateToTab(ProviderBookingsRoute, AppMode.ADMIN) },
                     )
                 }
                 screen<InventoryRoute> {
-                    InventoryScreen(onAddItem = { nav.navigate(ItemEditorRoute()) }, onOpenItem = { nav.navigate(ItemEditorRoute(it)) })
+                    InventoryScreen(
+                        onAddItem = { nav.navigate(ItemEditorRoute()) },
+                        onOpenItem = { nav.navigate(ItemEditorRoute(it)) },
+                        onOpenAudit = { nav.navigate(AuditRoute) },
+                    )
                 }
                 screen<ItemEditorRoute> { ItemEditorScreen(onBack = { nav.popBackStack() }) }
                 screen<ProviderBookingsRoute> {
-                    ProviderBookingsScreen(onHandover = { id, isReturn -> nav.navigate(HandoverRoute(id, isReturn)) })
+                    ProviderBookingsScreen(
+                        onHandover = { id, isReturn -> nav.navigate(HandoverRoute(id, isReturn)) },
+                        onViewBill = { id, isReturn -> nav.navigate(BillRoute(id, isReturn)) },
+                    )
                 }
-                screen<HandoverRoute> { HandoverScreen(onBack = { nav.popBackStack() }) }
+                screen<HandoverRoute> {
+                    HandoverScreen(
+                        onBack = { nav.popBackStack() },
+                        onDone = { id, isReturn -> nav.navigate(BillRoute(id, isReturn)) { popUpTo<HandoverRoute>() { inclusive = true } } },
+                    )
+                }
+                screen<BillRoute> { BillScreen(onDone = { nav.popBackStack() }) }
                 screen<EarningsRoute> { EarningsScreen() }
+                screen<AuditRoute> { AuditScreen(onBack = { nav.popBackStack() }) }
             }
         }
     }

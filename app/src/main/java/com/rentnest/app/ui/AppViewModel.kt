@@ -3,7 +3,7 @@ package com.rentnest.app.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.rentnest.app.data.seed.DemoDataManager
-import com.rentnest.app.domain.DEMO_USER_ID
+import com.rentnest.app.domain.ADMIN_USER_ID
 import com.rentnest.app.domain.model.BookingStatus
 import com.rentnest.app.domain.model.SessionState
 import com.rentnest.app.domain.repository.BookingRepository
@@ -34,7 +34,7 @@ class AppViewModel @Inject constructor(
         viewModelScope.launch { demo.seedIfEmpty(); seeded.value = true }
     }
 
-    private val pending = catalog.providerForUser(DEMO_USER_ID).flatMapLatest { p ->
+    private val pending = catalog.providerForUser(ADMIN_USER_ID).flatMapLatest { p ->
         if (p == null) flowOf(0) else bookings.bookingsForProvider(p.id).map { l -> l.count { it.status == BookingStatus.REQUESTED } }
     }
 

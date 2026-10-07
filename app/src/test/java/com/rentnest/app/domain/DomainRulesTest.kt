@@ -2,6 +2,7 @@ package com.rentnest.app.domain
 
 import com.rentnest.app.domain.format.DateFormats
 import com.rentnest.app.domain.format.MoneyFormatter
+import com.rentnest.app.domain.format.PhoneNumbers
 import com.rentnest.app.domain.model.*
 import com.rentnest.app.domain.rules.*
 import com.rentnest.app.domain.time.DateMillis
@@ -175,11 +176,109 @@ class StockAlertsTest {
 class ItemValidatorTest {
     @Test fun requiresFields() {
         val errors = ItemValidator.validate(ItemDraft(providerId = 1, deposit = -1))
-        assertEquals(setOf(ItemField.TITLE, ItemField.CATEGORY, ItemField.DAILY_RATE, ItemField.WEEKLY_RATE, ItemField.DEPOSIT), errors)
+        assertEquals(setOf(ItemField.TITLE, ItemField.CATEGORY, ItemField.PHOTOS, ItemField.DAILY_RATE, ItemField.WEEKLY_RATE, ItemField.DEPOSIT), errors)
     }
+    private val ok = ItemDraft(providerId = 1, title = "Drill", categoryId = 1, photos = listOf("/p/drill.jpg"), dailyRate = 100, weeklyRate = 700)
     @Test fun weeklyCannotExceedSevenDays() {
-        val ok = ItemDraft(providerId = 1, title = "Drill", categoryId = 1, dailyRate = 100, weeklyRate = 700)
         assertTrue(ItemValidator.validate(ok).isEmpty())
         assertEquals(setOf(ItemField.WEEKLY_RATE), ItemValidator.validate(ok.copy(weeklyRate = 701)))
+    }
+    @Test fun borrowedNeedsVendorAndCost() {
+        val borrowed = ok.copy(ownership = Ownership.BORROWED, vendorCostPerDay = null)
+        assertEquals(setOf(ItemField.VENDOR, ItemField.VENDOR_COST), ItemValidator.validate(borrowed))
+        assertEquals(setOf(ItemField.UNIT_VALUE), ItemValidator.validate(ok.copy(unitValue = -1)))
+        val item = (ItemValidator.toItem(borrowed.copy(vendorId = 3, vendorCostPerDay = 40, vendorReturnBy = D0)) as Outcome.Success).value
+        assertEquals(Ownership.BORROWED, item.ownership)
+        assertEquals(3L, item.vendorId)
+        assertEquals(40L, item.vendorCostPerDay)
+    }
+    @Test fun ownedItemDropsVendorFields() {
+        val item = (ItemValidator.toItem(ok.copy(vendorId = 3, vendorCostPerDay = 40, vendorReturnBy = D0)) as Outcome.Success).value
+        assertNull(item.vendorId)
+        assertEquals(0L, item.vendorCostPerDay)
+        assertNull(item.vendorReturnBy)
+    }
+}
+
+class LateFeesTest {
+    @Test fun dueTodayIsNotLate() {
+        assertEquals(0, LateFees.daysLate(D0, D0))
+        assertEquals(0, LateFees.daysLate(d(3), D0))
+        assertEquals(2, LateFees.daysLate(d(-2), D0))
+    }
+    @Test fun feeIsDailyRatePerLateDay() {
+        assertEquals(0L, LateFees.fee(D0, D0, 50_000))
+        assertEquals(150_000L, LateFees.fee(d(-3), D0, 50_000))
+    }
+    @Test fun onlyActiveRentalsPastTheirEndAreOverdue() {
+        assertTrue(LateFees.isOverdue(booking(1, 1, -5, -1, BookingStatus.ACTIVE), D0))
+        assertFalse(LateFees.isOverdue(booking(1, 1, -5, 0, BookingStatus.ACTIVE), D0))
+        assertFalse(LateFees.isOverdue(booking(1, 1, -5, -1, BookingStatus.RETURNED), D0))
+    }
+    @Test fun settlementRefundsOrCollects() {
+        assertEquals(500L, Settlement(advance = 1_000, damageFee = 200, lateFee = 300).balance)
+        assertEquals(-400L, Settlement(advance = 1_000, damageFee = 600, lateFee = 800).balance)
+    }
+    @Test fun settlementIncludesCleaningAndDropTransport() {
+        val s = Settlement(advance = 2_000, damageFee = 0, lateFee = 0, cleaningFee = 300, dropTransportFee = 500)
+        assertEquals(800L, s.charges)
+        assertEquals(1_200L, s.balance)
+        val owed = Settlement(advance = 500, damageFee = 0, lateFee = 0, cleaningFee = 300, dropTransportFee = 500)
+        assertEquals(-300L, owed.balance)
+    }
+}
+
+class InventoryMetricsTest {
+    private fun item(id: Long, daily: Long, value: Long, borrowed: Boolean = false, vendorCost: Long = 0) = Item(
+        id, 1, 1, "Item $id", "", emptyList(), daily, daily * 6, 0, emptyMap(), unitValue = value,
+        ownership = if (borrowed) Ownership.BORROWED else Ownership.OWNED, vendorId = if (borrowed) 1 else null, vendorCostPerDay = vendorCost,
+    )
+    private fun u(id: Long, itemId: Long, status: UnitStatus = UnitStatus.AVAILABLE) = ItemUnit(id, itemId, "U$id", UnitCondition.GOOD, status)
+    private fun active(unitId: Long, itemId: Long) = Booking(unitId, itemId, unitId, 9, d(-1), d(1), BookingStatus.ACTIVE, 0, 0, createdAt = 0)
+
+    @Test fun perItemStockAndMoney() {
+        val camera = item(1, daily = 1_000, value = 50_000)
+        val units = listOf(u(1, 1), u(2, 1), u(3, 1, UnitStatus.MAINTENANCE), u(4, 1, UnitStatus.RETIRED))
+        val s = InventoryMetrics.stock(camera, units, listOf(active(1, 1)))
+        assertEquals(3, s.units)
+        assertEquals(1, s.out)
+        assertEquals(2, s.inStore)
+        assertEquals(1, s.inService)
+        assertEquals(150_000L, s.worth)
+        assertEquals(2_000L, s.dailyPotential)
+        assertEquals(1_000L, s.dailyEarning)
+        assertEquals(0L, s.dailyVendorCost)
+    }
+
+    @Test fun totalsSplitOwnedAndBorrowed() {
+        val owned = InventoryMetrics.stock(item(1, 1_000, 50_000), listOf(u(1, 1), u(2, 1)), listOf(active(1, 1)))
+        val borrowed = InventoryMetrics.stock(item(2, 500, 20_000, borrowed = true, vendorCost = 200), listOf(u(3, 2)), listOf(active(3, 2)))
+        val t = InventoryMetrics.totals(listOf(owned, borrowed))
+        assertEquals(2, t.products)
+        assertEquals(3, t.units)
+        assertEquals(2, t.unitsOut)
+        assertEquals(1, t.unitsInStore)
+        assertEquals(100_000L, t.ownedWorth)
+        assertEquals(20_000L, t.borrowedWorth)
+        assertEquals(120_000L, t.totalWorth)
+        assertEquals(1_500L, t.dailyEarning)
+        assertEquals(200L, t.dailyVendorCost)
+        assertEquals(1_300L, t.netDaily)
+        assertEquals(2_500L, t.dailyPotential)
+        assertEquals(1, t.borrowedProducts)
+    }
+}
+
+class PhoneNumbersTest {
+    @Test fun normalisesIndianMobiles() {
+        assertEquals("+91 98450 12001", PhoneNumbers.display("9845012001"))
+        assertEquals("+91 98450 12001", PhoneNumbers.display("+91 98450 12001"))
+        assertEquals("+91 98450 12001", PhoneNumbers.display("09845012001"))
+        assertEquals("+919845012001", PhoneNumbers.e164("+91 98450 12001"))
+    }
+    @Test fun rejectsInvalid() {
+        assertNull(PhoneNumbers.display("12345"))
+        assertNull(PhoneNumbers.display("1234567890")) // mobiles start with 6-9
+        assertNull(PhoneNumbers.display(""))
     }
 }

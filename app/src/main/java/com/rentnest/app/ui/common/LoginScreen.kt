@@ -12,10 +12,15 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.rentnest.app.domain.format.PhoneNumbers
 import com.rentnest.app.ui.components.PrimaryButton
 import kotlinx.coroutines.delay
 
@@ -26,7 +31,7 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: SessionActionsViewModel = hil
     var otp by rememberSaveable { mutableStateOf("") }
     var verifying by remember { mutableStateOf(false) }
     LaunchedEffect(verifying) {
-        if (verifying) { delay(800); viewModel.logIn(onLoggedIn) }
+        if (verifying) { delay(800); viewModel.logIn(phone, onLoggedIn) }
     }
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(24.dp).imePadding()) {
@@ -43,6 +48,8 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: SessionActionsViewModel = hil
                         OutlinedTextField(
                             value = phone,
                             onValueChange = { v -> phone = v.filter(Char::isDigit).take(10) },
+                            isError = phone.length == 10 && PhoneNumbers.nationalDigits(phone) == null,
+                            supportingText = { Text("We'll text you here about your rentals.") },
                             label = { Text("Mobile number") },
                             prefix = { Text("+91 ") },
                             singleLine = true,
@@ -51,7 +58,7 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: SessionActionsViewModel = hil
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Spacer(Modifier.height(24.dp))
-                        PrimaryButton("Send OTP", onClick = { otpStep = true }, enabled = phone.length == 10, modifier = Modifier.fillMaxWidth())
+                        PrimaryButton("Send OTP", onClick = { otpStep = true }, enabled = PhoneNumbers.nationalDigits(phone) != null, modifier = Modifier.fillMaxWidth())
                     } else {
                         Text("Enter the 4-digit code sent to +91 ${phone.take(5)} ${phone.drop(5)}", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(32.dp))
@@ -70,10 +77,17 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: SessionActionsViewModel = hil
 
 @Composable
 private fun OtpField(value: String, onChange: (String) -> Unit) {
+    val focusRequester = remember { FocusRequester() }
     BasicTextField(
         value = value,
         onValueChange = { onChange(it.filter(Char::isDigit).take(4)) },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        textStyle = LocalTextStyle.current.copy(color = Color.Transparent),
+        cursorBrush = SolidColor(Color.Transparent),
+        // Without an explicit size, an empty field has ~zero width, so taps on the visible boxes below miss it entirely.
+        modifier = Modifier
+            .focusRequester(focusRequester)
+            .size(width = 60.dp * 4 + 12.dp * 3, height = 60.dp),
         decorationBox = {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 repeat(4) { i ->
@@ -92,4 +106,5 @@ private fun OtpField(value: String, onChange: (String) -> Unit) {
             }
         },
     )
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
 }

@@ -1,13 +1,13 @@
 package com.rentnest.app.ui.customer
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,7 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -30,6 +30,7 @@ import com.rentnest.app.domain.DomainError
 import com.rentnest.app.domain.Outcome
 import com.rentnest.app.domain.format.DateFormats
 import com.rentnest.app.domain.format.MoneyFormatter
+import com.rentnest.app.domain.format.PhoneNumbers
 import com.rentnest.app.domain.getOrNull
 import com.rentnest.app.domain.message
 import com.rentnest.app.domain.model.*
@@ -44,7 +45,6 @@ import com.rentnest.app.ui.navigation.BookingDatesRoute
 import com.rentnest.app.ui.navigation.BookingSuccessRoute
 import com.rentnest.app.ui.navigation.CheckoutRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -136,13 +136,7 @@ fun BookingDatesScreen(onBack: () -> Unit, onContinue: (Long, Long, Long) -> Uni
     }
 }
 
-// ---------- Checkout ----------
-
-enum class PaymentMethod(val title: String, val subtitle: String) {
-    UPI("UPI", "arjun@okrentnest"),
-    CARD("Credit / debit card", "Visa •••• 4242"),
-    WALLET("RentNest Wallet", "Balance ₹25,000"),
-}
+// ---------- Request ----------
 
 data class CheckoutUiState(
     val loading: Boolean = true,
@@ -150,13 +144,15 @@ data class CheckoutUiState(
     val providerName: String = "",
     val range: DateRange? = null,
     val breakdown: PriceBreakdown? = null,
-    val method: PaymentMethod = PaymentMethod.UPI,
+    val phone: String = "",
     val processing: Boolean = false,
     val error: DomainError? = null,
     val bookedId: Long? = null,
-)
+) {
+    val phoneValid: Boolean get() = PhoneNumbers.nationalDigits(phone) != null
+}
 
-private data class CheckoutLocal(val method: PaymentMethod = PaymentMethod.UPI, val processing: Boolean = false, val error: DomainError? = null, val bookedId: Long? = null)
+private data class CheckoutLocal(val phone: String? = null, val processing: Boolean = false, val error: DomainError? = null, val bookedId: Long? = null)
 
 @HiltViewModel
 class CheckoutViewModel @Inject constructor(
@@ -168,24 +164,26 @@ class CheckoutViewModel @Inject constructor(
     private val range = DateRange(LocalDate.ofEpochDay(route.startEpochDay), LocalDate.ofEpochDay(route.endEpochDay))
     private val local = MutableStateFlow(CheckoutLocal())
 
-    val state = combine(catalog.item(route.itemId), catalog.providers(), local) { item, providers, l ->
+    val state = combine(catalog.item(route.itemId), catalog.providers(), catalog.user(DEMO_USER_ID), local) { item, providers, user, l ->
         CheckoutUiState(
             loading = false, item = item, providerName = providers.firstOrNull { it.id == item?.providerId }?.shopName.orEmpty(),
             range = range, breakdown = item?.let { PricingEngine.quote(it, range).getOrNull() },
-            method = l.method, processing = l.processing, error = l.error, bookedId = l.bookedId,
+            // Until edited, use the number the customer signed in with.
+            phone = l.phone ?: user?.phone?.let(PhoneNumbers::nationalDigits).orEmpty(),
+            processing = l.processing, error = l.error, bookedId = l.bookedId,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CheckoutUiState())
 
-    fun selectMethod(m: PaymentMethod) = local.update { it.copy(method = m) }
+    fun setPhone(v: String) = local.update { it.copy(phone = v.filter(Char::isDigit).take(10), error = null) }
 
-    /** Idempotent: ignored while processing or once booked, so a double tap can't create two bookings. */
-    fun pay() {
+    /** Idempotent: ignored while sending or once sent, so a double tap can't create two requests. */
+    fun submit() {
         val current = local.value
         if (current.processing || current.bookedId != null) return
+        val phone = state.value.phone
         local.value = current.copy(processing = true, error = null)
         viewModelScope.launch {
-            delay(1_500) // simulated payment gateway
-            when (val r = bookings.requestBooking(route.itemId, DEMO_USER_ID, range)) {
+            when (val r = bookings.requestBooking(route.itemId, DEMO_USER_ID, range, phone)) {
                 is Outcome.Success -> local.update { it.copy(processing = false, bookedId = r.value.id) }
                 is Outcome.Failure -> local.update { it.copy(processing = false, error = r.error) }
             }
@@ -200,15 +198,15 @@ fun CheckoutScreen(onBack: () -> Unit, onBooked: (Long) -> Unit, viewModel: Chec
     LaunchedEffect(state.bookedId) {
         state.bookedId?.let { haptics.performHapticFeedback(HapticFeedbackType.Confirm); onBooked(it) }
     }
-    CheckoutContent(state, onBack, viewModel::selectMethod, viewModel::pay)
+    CheckoutContent(state, onBack, viewModel::setPhone, viewModel::submit)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CheckoutContent(state: CheckoutUiState, onBack: () -> Unit, onSelectMethod: (PaymentMethod) -> Unit, onPay: () -> Unit) {
+fun CheckoutContent(state: CheckoutUiState, onBack: () -> Unit, onPhoneChange: (String) -> Unit, onSubmit: () -> Unit) {
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Checkout") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") } })
+            TopAppBar(title = { Text("Request to rent") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") } })
         },
         bottomBar = {
             Surface(shadowElevation = 12.dp, color = MaterialTheme.colorScheme.surfaceContainerLowest) {
@@ -217,11 +215,11 @@ fun CheckoutContent(state: CheckoutUiState, onBack: () -> Unit, onSelectMethod: 
                         Text(state.error?.message().orEmpty(), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 8.dp))
                     }
                     PrimaryButton(
-                        text = "Pay ${state.breakdown?.let { MoneyFormatter.format(it.totalDueNow) } ?: ""}",
-                        onClick = onPay,
-                        enabled = state.breakdown != null,
+                        text = "Send request",
+                        onClick = onSubmit,
+                        enabled = state.breakdown != null && state.phoneValid,
                         loading = state.processing,
-                        icon = Icons.Rounded.Lock,
+                        icon = Icons.AutoMirrored.Rounded.Send,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -229,7 +227,7 @@ fun CheckoutContent(state: CheckoutUiState, onBack: () -> Unit, onSelectMethod: 
         },
     ) { padding ->
         val item = state.item ?: return@Scaffold
-        Column(Modifier.padding(padding).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.padding(padding).verticalScroll(rememberScrollState()).padding(16.dp).imePadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Card(shape = MaterialTheme.shapes.medium, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     ItemArt(item.photos.firstOrNull().orEmpty(), Modifier.size(72.dp).clip(MaterialTheme.shapes.small), iconSize = 32.dp)
@@ -242,31 +240,36 @@ fun CheckoutContent(state: CheckoutUiState, onBack: () -> Unit, onSelectMethod: 
                 }
             }
             state.breakdown?.let { PriceBreakdownCard(it, item.dailyRate, item.weeklyRate) }
-            Text("Payment method", style = MaterialTheme.typography.titleMedium)
-            PaymentMethod.entries.forEach { m ->
-                val selected = m == state.method
-                OutlinedCard(
-                    shape = MaterialTheme.shapes.small,
-                    border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.selectable(selected, role = Role.RadioButton) { onSelectMethod(m) },
-                ) {
-                    Row(Modifier.padding(14.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(when (m) { PaymentMethod.UPI -> Icons.Rounded.QrCode2; PaymentMethod.CARD -> Icons.Rounded.CreditCard; PaymentMethod.WALLET -> Icons.Rounded.AccountBalanceWallet }, null)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(m.title, style = MaterialTheme.typography.titleSmall)
-                            Text(m.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        RadioButton(selected = selected, onClick = null)
-                    }
+            Text("Your mobile number", style = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(
+                value = state.phone,
+                onValueChange = onPhoneChange,
+                prefix = { Text("+91 ") },
+                singleLine = true,
+                isError = state.phone.length == 10 && !state.phoneValid,
+                supportingText = { Text("We'll text you here if the return is late.") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Card(shape = MaterialTheme.shapes.medium, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("How it works", style = MaterialTheme.typography.titleSmall)
+                    HowItWorks(Icons.Rounded.HourglassTop, "The store reviews your request. You can rent only after it's approved.")
+                    HowItWorks(Icons.Rounded.Payments, "Pay ${state.breakdown?.let { MoneyFormatter.format(it.totalDueNow) } ?: "the total"} at pickup, including the refundable advance.")
+                    HowItWorks(Icons.Rounded.EventBusy, "Return by ${state.range?.let { DateFormats.full(it.end) }.orEmpty()}. Each late day costs ${MoneyFormatter.format(item.dailyRate)}, taken from your advance.")
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Info, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.width(6.dp))
-                Text("Demo mode: no real payment is made. The provider confirms your request.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
         }
+    }
+}
+
+@Composable
+private fun HowItWorks(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
+    Row(verticalAlignment = Alignment.Top) {
+        Icon(icon, null, Modifier.size(18.dp))
+        Spacer(Modifier.width(10.dp))
+        Text(text, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
@@ -286,12 +289,12 @@ fun BookingSuccessScreen(onViewRentals: () -> Unit, onHome: () -> Unit, viewMode
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             SuccessAnimation()
-            Text("Request sent!", style = MaterialTheme.typography.headlineMedium)
+            Text("Request sent to the store", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
             Spacer(Modifier.height(8.dp))
             val (booking, item) = data ?: (null to null)
             Text(
-                if (booking != null && item != null) "${item.title} · ${DateFormats.range(booking.range)}\nBooking ${DateFormats.bookingCode(booking.id)}. The provider usually confirms within an hour."
-                else "The provider usually confirms within an hour.",
+                if (booking != null && item != null) "${item.title} · ${DateFormats.range(booking.range)}\nBooking ${DateFormats.bookingCode(booking.id)}. We'll notify you as soon as the admin approves it."
+                else "We'll notify you as soon as the admin approves it.",
                 textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(32.dp))

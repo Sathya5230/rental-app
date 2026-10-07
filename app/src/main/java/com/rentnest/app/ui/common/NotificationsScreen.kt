@@ -20,6 +20,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import com.rentnest.app.domain.ADMIN_USER_ID
 import com.rentnest.app.domain.DEMO_USER_ID
 import com.rentnest.app.domain.format.DateFormats
 import com.rentnest.app.domain.model.AppMode
@@ -38,6 +39,8 @@ import javax.inject.Inject
 
 data class NotificationsUiState(val loading: Boolean = true, val mode: AppMode = AppMode.CUSTOMER, val items: List<AppNotification> = emptyList(), val now: Long = 0)
 
+private val AppMode.recipient get() = if (this == AppMode.ADMIN) ADMIN_USER_ID else DEMO_USER_ID
+
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class NotificationsViewModel @Inject constructor(
@@ -47,14 +50,14 @@ class NotificationsViewModel @Inject constructor(
 ) : ViewModel() {
     private val mode = session.session.map { it.mode }.distinctUntilChanged()
     val state = mode.flatMapLatest { m ->
-        notifications.notifications(DEMO_USER_ID, m.audience).map { NotificationsUiState(false, m, it, time.nowMillis()) }
+        notifications.notifications(m.recipient, m.audience).map { NotificationsUiState(false, m, it, time.nowMillis()) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NotificationsUiState())
 
     init {
         viewModelScope.launch {
             val m = mode.first()
             delay(1_500) // let the unread dots register before clearing them
-            notifications.markAllRead(DEMO_USER_ID, m.audience)
+            notifications.markAllRead(m.recipient, m.audience)
         }
     }
 }

@@ -31,22 +31,25 @@ class CheckoutViewModelTest {
     private val time = FixedTime()
 
     @Before fun setUp() = runBlocking {
-        Dispatchers.setMain(Dispatchers.Unconfined) // real-time delay for the simulated payment
+        Dispatchers.setMain(Dispatchers.Unconfined)
         db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), AppDatabase::class.java).allowMainThreadQueries().build()
         DemoDataManager(db, time).seedIfEmpty()
     }
 
     @After fun tearDown() { db.close(); Dispatchers.resetMain() }
 
-    @Test fun payTwiceCreatesOneBooking() = runBlocking {
+    @Test fun submitTwiceCreatesOneRequest() = runBlocking {
         val start = time.today().plusDays(20).toEpochDay()
         val handle = SavedStateHandle(mapOf("itemId" to 11L, "startEpochDay" to start, "endEpochDay" to start + 2))
         val vm = CheckoutViewModel(handle, RoomCatalogRepository(db), RoomBookingRepository(db, time))
-        vm.pay()
-        vm.pay()
+        // The signed-in customer's number is filled in before submitting
+        withTimeout(10_000) { vm.state.first { it.phoneValid } }
+        vm.submit()
+        vm.submit()
         withTimeout(10_000) { vm.state.first { it.bookedId != null } }
-        vm.pay()
+        vm.submit()
         val mine = db.bookingDao().bookingsForCustomer(DEMO_USER_ID).first().filter { it.itemId == 11L }
         assertEquals(1, mine.size)
+        assertEquals("+91 98450 12001", mine.single().contactPhone)
     }
 }

@@ -1,19 +1,31 @@
 package com.rentnest.app.ui.components
 
+import android.graphics.BitmapFactory
+import android.util.LruCache
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.rentnest.app.data.photos.PhotoStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 
 object CategoryVisuals {
     private val palettes = mapOf(
@@ -44,9 +56,40 @@ object PhotoKeys {
     fun variants(categoryKey: String): List<String> = (0 until 4).map { "$categoryKey:$it" }
 }
 
-/** Offline "photo": a category gradient with the category glyph. Variant changes direction and composition. */
+/** Decoded item photos, shared across screens. Sized so a list of thumbnails stays cheap. */
+private object PhotoCache {
+    private const val MAX_EDGE = 1080
+    private val cache = object : LruCache<String, ImageBitmap>(24 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: ImageBitmap) = value.width * value.height * 4
+    }
+
+    fun peek(path: String): ImageBitmap? = cache.get(path)
+
+    suspend fun load(path: String): ImageBitmap? = cache.get(path) ?: withContext(Dispatchers.IO) {
+        val file = File(path)
+        if (!file.exists()) return@withContext null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_EDGE) sample *= 2
+        BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()?.also { cache.put(path, it) }
+    }
+}
+
+/**
+ * An item photo. Real photos are file paths saved by PhotoStore; anything else is an offline placeholder:
+ * a category gradient with the category glyph, where the variant changes direction and composition.
+ */
 @Composable
 fun ItemArt(photoKey: String, modifier: Modifier = Modifier, iconSize: Dp = 52.dp) {
+    if (PhotoStore.isFile(photoKey)) {
+        val bitmap by produceState(PhotoCache.peek(photoKey), photoKey) { value = PhotoCache.load(photoKey) }
+        val image = bitmap
+        if (image != null) {
+            Image(image, contentDescription = null, contentScale = ContentScale.Crop, modifier = modifier.clipToBounds())
+            return
+        }
+    }
     val (category, variant) = PhotoKeys.parse(photoKey)
     val colors = CategoryVisuals.gradient(category).let { if (variant % 2 == 0) it else it.reversed() }
     val icon = CategoryVisuals.icon(category)

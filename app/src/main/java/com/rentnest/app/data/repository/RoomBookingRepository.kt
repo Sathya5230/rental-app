@@ -6,11 +6,13 @@ import com.rentnest.app.domain.DomainError
 import com.rentnest.app.domain.Outcome
 import com.rentnest.app.domain.format.DateFormats
 import com.rentnest.app.domain.format.MoneyFormatter
+import com.rentnest.app.domain.format.PhoneNumbers
 import com.rentnest.app.domain.model.*
 import com.rentnest.app.domain.repository.BookingRepository
 import com.rentnest.app.domain.rules.AvailabilityCalculator
 import com.rentnest.app.domain.rules.BookingAction
 import com.rentnest.app.domain.rules.BookingStateMachine
+import com.rentnest.app.domain.rules.LateFees
 import com.rentnest.app.domain.rules.PricingEngine
 import com.rentnest.app.domain.time.TimeProvider
 import kotlinx.coroutines.flow.map
@@ -30,11 +32,12 @@ class RoomBookingRepository @Inject constructor(
     override fun bookingsForProvider(providerId: Long) = bookings.bookingsForProvider(providerId).map { l -> l.map { it.toDomain() } }
     override fun booking(id: Long) = bookings.booking(id).map { it?.toDomain() }
 
-    override suspend fun requestBooking(itemId: Long, customerId: Long, range: DateRange) =
-        db.withTransaction { doRequest(itemId, customerId, range) }
+    override suspend fun requestBooking(itemId: Long, customerId: Long, range: DateRange, contactPhone: String) =
+        db.withTransaction { doRequest(itemId, customerId, range, contactPhone) }
 
-    private suspend fun doRequest(itemId: Long, customerId: Long, range: DateRange): Outcome<Booking> {
+    private suspend fun doRequest(itemId: Long, customerId: Long, range: DateRange, contactPhone: String): Outcome<Booking> {
         if (!range.isValid || range.start.isBefore(time.today())) return Outcome.Failure(DomainError.InvalidDateRange)
+        val phone = PhoneNumbers.display(contactPhone) ?: return Outcome.Failure(DomainError.InvalidPhone)
         val item = catalog.itemOnce(itemId)?.toDomain() ?: return Outcome.Failure(DomainError.NotFound)
         val provider = catalog.providerOnce(item.providerId) ?: return Outcome.Failure(DomainError.NotFound)
         if (provider.userId == customerId) return Outcome.Failure(DomainError.OwnListing)
@@ -48,10 +51,11 @@ class RoomBookingRepository @Inject constructor(
         val entity = BookingEntity(
             itemId = itemId, unitId = null, customerId = customerId, startDate = range.start, endDate = range.end,
             status = BookingStatus.REQUESTED, subtotal = quote.subtotal, deposit = quote.deposit, damageFee = 0,
-            createdAt = time.nowMillis(), reviewed = false,
+            createdAt = time.nowMillis(), reviewed = false, contactPhone = phone,
         )
         val id = bookings.insertBooking(entity)
-        notify(provider.userId, Audience.PROVIDER, "New booking request", "${item.title} · ${DateFormats.range(range)}", id)
+        val customer = catalog.userOnce(customerId)?.name ?: "A customer"
+        notify(provider.userId, Audience.ADMIN, "New rental request", "$customer wants ${item.title} · ${DateFormats.range(range)}. Approve or decline it.", id)
         return Outcome.Success(entity.copy(id = id).toDomain())
     }
 
@@ -63,7 +67,7 @@ class RoomBookingRepository @Inject constructor(
             if (free.none { it.id == unitId }) return@transition Outcome.Failure(DomainError.NoUnitFree)
             val updated = b.copy(status = next, unitId = unitId)
             bookings.updateBooking(updated)
-            notify(b.customerId, Audience.CUSTOMER, "Booking confirmed", "${title(b)} is reserved for ${DateFormats.range(b.toDomain().range)}", b.id)
+            notify(b.customerId, Audience.CUSTOMER, "Request approved", "${title(b)} is reserved for ${DateFormats.range(b.toDomain().range)}. Pay the advance of ${MoneyFormatter.format(b.deposit)} at pickup.", b.id)
             Outcome.Success(updated)
         }
     }
@@ -81,31 +85,38 @@ class RoomBookingRepository @Inject constructor(
         transition(bookingId, BookingAction.CANCEL) { b, next ->
             val updated = b.copy(status = next)
             bookings.updateBooking(updated)
-            ownerOf(b)?.let { notify(it, Audience.PROVIDER, "Booking cancelled", "${title(b)} · ${DateFormats.range(b.toDomain().range)} was cancelled", b.id) }
+            ownerOf(b)?.let { notify(it, Audience.ADMIN, "Booking cancelled", "${title(b)} · ${DateFormats.range(b.toDomain().range)} was cancelled", b.id) }
             Outcome.Success(updated)
         }
     }
 
-    override suspend fun checkOut(bookingId: Long, checklist: List<String>, notes: String) = db.withTransaction {
+    override suspend fun checkOut(bookingId: Long, checklist: List<String>, notes: String, transportFee: Long) = db.withTransaction {
         transition(bookingId, BookingAction.CHECK_OUT) { b, next ->
             val unit = b.unitId?.let { inventory.unitOnce(it) } ?: return@transition Outcome.Failure(DomainError.NoUnitFree)
-            val updated = b.copy(status = next)
+            val transport = transportFee.coerceAtLeast(0)
+            val updated = b.copy(status = next, pickupTransportFee = transport)
             bookings.updateBooking(updated)
             bookings.insertHandover(
                 HandoverEntity(bookingId = b.id, type = HandoverType.PICKUP, checklist = checklist, conditionAfter = unit.condition,
                     notes = notes, damageFee = 0, timestamp = time.nowMillis()),
             )
-            notify(b.customerId, Audience.CUSTOMER, "Rental started", "Enjoy your ${title(b)}! Return by ${DateFormats.short(b.endDate)}.", b.id)
+            val transportText = if (transport > 0) " Transport charge collected: ${MoneyFormatter.format(transport)}." else ""
+            notify(b.customerId, Audience.CUSTOMER, "Rental started", "Enjoy your ${title(b)}!$transportText Return by ${DateFormats.short(b.endDate)}.", b.id)
             Outcome.Success(updated)
         }
     }
 
     override suspend fun processReturn(
-        bookingId: Long, checklist: List<String>, conditionAfter: UnitCondition, notes: String, damageFee: Long,
+        bookingId: Long, checklist: List<String>, conditionAfter: UnitCondition, notes: String,
+        damageFee: Long, transportFee: Long, cleaningFee: Long,
     ) = db.withTransaction {
         transition(bookingId, BookingAction.RETURN) { b, next ->
             val fee = damageFee.coerceAtLeast(0)
-            val updated = b.copy(status = next, damageFee = fee)
+            val transport = transportFee.coerceAtLeast(0)
+            val cleaning = cleaningFee.coerceAtLeast(0)
+            val dailyRate = catalog.itemOnce(b.itemId)?.dailyRate ?: 0
+            val late = LateFees.fee(b.endDate, time.today(), dailyRate)
+            val updated = b.copy(status = next, damageFee = fee, lateFee = late, dropTransportFee = transport, cleaningFee = cleaning)
             bookings.updateBooking(updated)
             b.unitId?.let { inventory.unitOnce(it) }?.let { unit ->
                 val status = if (conditionAfter == UnitCondition.DAMAGED) UnitStatus.MAINTENANCE else unit.status
@@ -115,8 +126,14 @@ class RoomBookingRepository @Inject constructor(
                 HandoverEntity(bookingId = b.id, type = HandoverType.RETURN, checklist = checklist, conditionAfter = conditionAfter,
                     notes = notes, damageFee = fee, timestamp = time.nowMillis()),
             )
-            val feeText = if (fee > 0) " A damage fee of ${MoneyFormatter.format(fee)} was applied." else " Your deposit is on its way back."
-            notify(b.customerId, Audience.CUSTOMER, "Return complete", "Thanks for returning ${title(b)}.$feeText Leave a review?", b.id)
+            val charges = listOfNotNull(
+                late.takeIf { it > 0 }?.let { "late fee ${MoneyFormatter.format(it)}" },
+                fee.takeIf { it > 0 }?.let { "damage fee ${MoneyFormatter.format(it)}" },
+                cleaning.takeIf { it > 0 }?.let { "cleaning charge ${MoneyFormatter.format(it)}" },
+                transport.takeIf { it > 0 }?.let { "transport charge ${MoneyFormatter.format(it)}" },
+            )
+            val feeText = if (charges.isEmpty()) " Your advance is on its way back." else " Deducted from your advance: ${charges.joinToString(", ")}."
+            notify(b.customerId, Audience.CUSTOMER, "Rental closed", "Thanks for returning ${title(b)}.$feeText Leave a review?", b.id)
             Outcome.Success(updated)
         }
     }
@@ -132,8 +149,23 @@ class RoomBookingRepository @Inject constructor(
         val entity = ReviewEntity(itemId = b.itemId, bookingId = b.id, customerId = b.customerId, rating = rating, text = text.trim(), createdAt = time.nowMillis())
         val id = bookings.insertReview(entity)
         bookings.updateBooking(b.copy(reviewed = true))
-        ownerOf(b)?.let { notify(it, Audience.PROVIDER, "New $rating★ review", "${title(b)}: \"${text.trim().take(80)}\"", b.id) }
+        ownerOf(b)?.let { notify(it, Audience.ADMIN, "New $rating★ review", "${title(b)}: \"${text.trim().take(80)}\"", b.id) }
         return Outcome.Success(entity.copy(id = id).toDomain())
+    }
+
+    override suspend fun recordOverdueReminder(bookingId: Long): Outcome<Booking> = db.withTransaction {
+        val b = bookings.bookingOnce(bookingId) ?: return@withTransaction Outcome.Failure(DomainError.NotFound)
+        val today = time.today()
+        if (!LateFees.isOverdue(b.toDomain(), today)) return@withTransaction Outcome.Failure(DomainError.NotOverdue)
+        val updated = b.copy(overdueSmsAt = time.nowMillis())
+        bookings.updateBooking(updated)
+        val rate = catalog.itemOnce(b.itemId)?.dailyRate ?: 0
+        notify(
+            b.customerId, Audience.CUSTOMER, "Return overdue",
+            "${title(b)} was due on ${DateFormats.short(b.endDate)}. Late fee so far: ${MoneyFormatter.format(LateFees.fee(b.endDate, today, rate))}, taken from your advance. Please return it today.",
+            b.id,
+        )
+        Outcome.Success(updated.toDomain())
     }
 
     private suspend fun transition(

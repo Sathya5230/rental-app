@@ -43,7 +43,6 @@ data class HomeUiState(
     val userName: String = "",
     val categories: List<Category> = emptyList(),
     val popular: List<ItemSummary> = emptyList(),
-    val topProviders: List<Provider> = emptyList(),
     val recent: List<ItemSummary> = emptyList(),
     val unread: Int = 0,
 )
@@ -65,7 +64,6 @@ class HomeViewModel @Inject constructor(
             categories = snap.categories,
             popular = snap.items.sortedWith(compareByDescending<Item> { snap.bookingCounts[it.id] ?: 0 }.thenByDescending { snap.ratings[it.id]?.average ?: 0.0 })
                 .take(8).map(snap::summary),
-            topProviders = snap.providers.values.sortedByDescending { it.rating }.take(6),
             // Skip ids that no longer exist (e.g. after a demo reset)
             recent = s.recentItemIds.mapNotNull { byId[it] }.take(6).map(snap::summary),
             unread = unread,
@@ -80,7 +78,6 @@ fun HomeScreen(
     onOpenItem: (Long) -> Unit,
     onOpenSearch: (Long?) -> Unit,
     onOpenNotifications: () -> Unit,
-    onOpenProvider: (Long) -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -130,12 +127,6 @@ fun HomeScreen(
                     }
                 }
             }
-            item {
-                SectionHeader("Top providers")
-                LazyRow(Modifier.carouselGestureExclusion(), contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(state.topProviders, key = { it.id }) { p -> ProviderChip(p) { onOpenProvider(p.id) } }
-                }
-            }
             if (state.recent.isNotEmpty()) item {
                 SectionHeader("Recently viewed")
                 val recentState = rememberLazyListState()
@@ -177,19 +168,5 @@ private fun CategoryTile(category: Category, onClick: () -> Unit) {
         ) { Icon(CategoryVisuals.icon(category.iconKey), null, tint = Color.White) }
         Spacer(Modifier.height(6.dp))
         Text(category.name, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable
-private fun ProviderChip(p: Provider, onClick: () -> Unit) {
-    Card(onClick = onClick, shape = MaterialTheme.shapes.medium, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-        Row(Modifier.padding(12.dp).width(200.dp), verticalAlignment = Alignment.CenterVertically) {
-            Avatar(p.shopName)
-            Spacer(Modifier.width(10.dp))
-            Column {
-                Text(p.shopName, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("★ ${p.rating} · ${p.locationText.substringBefore(',')}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-            }
-        }
     }
 }

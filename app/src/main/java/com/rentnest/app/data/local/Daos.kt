@@ -27,6 +27,12 @@ interface CatalogDao {
     @Delete suspend fun removeFavourite(f: FavouriteEntity)
     @Query("SELECT * FROM users WHERE id = :id") fun user(id: Long): Flow<UserEntity?>
     @Query("SELECT * FROM users") fun users(): Flow<List<UserEntity>>
+    @Query("SELECT * FROM users WHERE id = :id") suspend fun userOnce(id: Long): UserEntity?
+    @Update suspend fun updateUser(u: UserEntity)
+    @Query("SELECT * FROM categories WHERE LOWER(name) = LOWER(:name) LIMIT 1") suspend fun categoryByName(name: String): CategoryEntity?
+    @Insert suspend fun insertCategory(c: CategoryEntity): Long
+    @Query("SELECT * FROM vendors ORDER BY name") fun vendors(): Flow<List<VendorEntity>>
+    @Insert suspend fun insertVendor(v: VendorEntity): Long
 }
 
 @Dao
@@ -39,6 +45,8 @@ interface InventoryDao {
     @Query("SELECT * FROM item_units WHERE id = :id") suspend fun unitOnce(id: Long): ItemUnitEntity?
     @Insert suspend fun insertUnit(u: ItemUnitEntity): Long
     @Update suspend fun updateUnit(u: ItemUnitEntity)
+    @Query("SELECT * FROM audits ORDER BY timestamp DESC, itemId") fun audits(): Flow<List<AuditEntity>>
+    @Insert suspend fun insertAudits(a: List<AuditEntity>)
 }
 
 @Dao
@@ -81,4 +89,6 @@ interface SeedDao {
     @Insert suspend fun reviews(v: List<ReviewEntity>)
     @Insert suspend fun favourites(v: List<FavouriteEntity>)
     @Insert suspend fun notifications(v: List<NotificationEntity>)
+    @Insert suspend fun vendors(v: List<VendorEntity>)
+    @Insert suspend fun audits(v: List<AuditEntity>)
 }

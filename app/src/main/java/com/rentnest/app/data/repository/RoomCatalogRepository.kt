@@ -2,7 +2,9 @@ package com.rentnest.app.data.repository
 
 import androidx.room.withTransaction
 import com.rentnest.app.data.local.*
+import com.rentnest.app.domain.DomainError
 import com.rentnest.app.domain.Outcome
+import com.rentnest.app.domain.format.PhoneNumbers
 import com.rentnest.app.domain.model.*
 import com.rentnest.app.domain.repository.CatalogRepository
 import com.rentnest.app.domain.rules.ItemDraft
@@ -48,6 +50,36 @@ class RoomCatalogRepository @Inject constructor(private val db: AppDatabase) : C
                 dao.updateItem(item.toEntity())
                 Outcome.Success(item.id)
             }
+        }
+    }
+
+    override suspend fun addCategory(name: String): Outcome<Category> {
+        val clean = name.trim().replace(Regex("\\s+"), " ")
+        if (clean.isEmpty()) return Outcome.Failure(DomainError.InvalidName)
+        return db.withTransaction {
+            dao.categoryByName(clean)?.let { return@withTransaction Outcome.Success(it.toDomain()) }
+            val key = clean.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifEmpty { "other" }
+            val entity = CategoryEntity(name = clean, iconKey = key)
+            Outcome.Success(entity.copy(id = dao.insertCategory(entity)).toDomain())
+        }
+    }
+
+    override fun vendors() = dao.vendors().map { l -> l.map { it.toDomain() } }
+
+    override suspend fun addVendor(name: String, phone: String): Outcome<Vendor> {
+        if (name.isBlank()) return Outcome.Failure(DomainError.InvalidName)
+        val display = if (phone.isBlank()) "" else PhoneNumbers.display(phone) ?: return Outcome.Failure(DomainError.InvalidPhone)
+        val entity = VendorEntity(name = name.trim(), phone = display)
+        return Outcome.Success(entity.copy(id = dao.insertVendor(entity)).toDomain())
+    }
+
+    override suspend fun updatePhone(userId: Long, phone: String): Outcome<User> {
+        val display = PhoneNumbers.display(phone) ?: return Outcome.Failure(DomainError.InvalidPhone)
+        return db.withTransaction {
+            val user = dao.userOnce(userId) ?: return@withTransaction Outcome.Failure(DomainError.NotFound)
+            val updated = user.copy(phone = display)
+            dao.updateUser(updated)
+            Outcome.Success(updated.toDomain())
         }
     }
 }

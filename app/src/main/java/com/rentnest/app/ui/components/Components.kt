@@ -120,10 +120,10 @@ fun statusStyle(status: BookingStatus): StatusStyle {
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     fun c(light: Long, darkC: Long) = Color(if (dark) darkC else light)
     return when (status) {
-        BookingStatus.REQUESTED -> StatusStyle("Pending", Icons.Rounded.HourglassTop, c(0xFFFFF0C2, 0xFF4A3B00), c(0xFF5C4400, 0xFFFFE08A))
-        BookingStatus.ACCEPTED -> StatusStyle("Confirmed", Icons.Rounded.EventAvailable, c(0xFFDCE7FF, 0xFF0B2E66), c(0xFF0B3A82, 0xFFC4D6FF))
+        BookingStatus.REQUESTED -> StatusStyle("Awaiting approval", Icons.Rounded.HourglassTop, c(0xFFFFF0C2, 0xFF4A3B00), c(0xFF5C4400, 0xFFFFE08A))
+        BookingStatus.ACCEPTED -> StatusStyle("Approved", Icons.Rounded.EventAvailable, c(0xFFDCE7FF, 0xFF0B2E66), c(0xFF0B3A82, 0xFFC4D6FF))
         BookingStatus.ACTIVE -> StatusStyle("Active", Icons.Rounded.PlayCircle, c(0xFFD6F5DD, 0xFF0F3D1D), c(0xFF0D5222, 0xFFA6EBB7))
-        BookingStatus.RETURNED -> StatusStyle("Completed", Icons.Rounded.TaskAlt, MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurfaceVariant)
+        BookingStatus.RETURNED -> StatusStyle("Closed", Icons.Rounded.TaskAlt, MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurfaceVariant)
         BookingStatus.DECLINED -> StatusStyle("Declined", Icons.Rounded.DoNotDisturbOn, c(0xFFFFDAD6, 0xFF5C1512), c(0xFF8C1D18, 0xFFFFB4AB))
         BookingStatus.CANCELLED -> StatusStyle("Cancelled", Icons.Rounded.Cancel, c(0xFFFFDAD6, 0xFF5C1512), c(0xFF8C1D18, 0xFFFFB4AB))
     }
@@ -141,7 +141,7 @@ fun StatusChip(status: BookingStatus, modifier: Modifier = Modifier) {
     }
 }
 
-/** Requested → Confirmed → Picked up → Returned, with an animated progress line. */
+/** Requested → Approved → Picked up → Closed, with an animated progress line. */
 @Composable
 fun StatusTimeline(status: BookingStatus, modifier: Modifier = Modifier) {
     if (status == BookingStatus.DECLINED || status == BookingStatus.CANCELLED) {
@@ -149,11 +149,11 @@ fun StatusTimeline(status: BookingStatus, modifier: Modifier = Modifier) {
         Row(modifier, verticalAlignment = Alignment.CenterVertically) {
             Icon(s.icon, null, tint = s.content, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
-            Text(if (status == BookingStatus.DECLINED) "Declined by provider" else "Cancelled", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (status == BookingStatus.DECLINED) "Declined by the store" else "Cancelled", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
-    val steps = listOf("Requested", "Confirmed", "Picked up", "Returned")
+    val steps = listOf("Requested", "Approved", "Picked up", "Closed")
     val index = when (status) { BookingStatus.REQUESTED -> 0; BookingStatus.ACCEPTED -> 1; BookingStatus.ACTIVE -> 2; else -> 3 }
     var started by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { started = true }
@@ -275,14 +275,14 @@ fun PriceBreakdownCard(breakdown: PriceBreakdown, dailyRate: Long, weeklyRate: L
                 PriceLine(if (breakdown.bestPriceApplied) "$label (best price)" else label, breakdown.weeklyCharge)
             }
             if (breakdown.extraDays > 0) PriceLine("${breakdown.extraDays} day${if (breakdown.extraDays > 1) "s" else ""} × ${MoneyFormatter.format(dailyRate)}", breakdown.dailyCharge)
-            PriceLine("Refundable deposit", breakdown.deposit)
+            PriceLine("Advance (refundable)", breakdown.deposit)
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Row {
-                Text("Total due now", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text("Total at pickup", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 Text(MoneyFormatter.format(breakdown.totalDueNow), style = MaterialTheme.typography.titleMedium)
             }
             Text(
-                "Rental ${MoneyFormatter.format(breakdown.subtotal)} for ${breakdown.days} day${if (breakdown.days > 1) "s" else ""}. Deposit is returned after a successful return.",
+                "Rental ${MoneyFormatter.format(breakdown.subtotal)} for ${breakdown.days} day${if (breakdown.days > 1) "s" else ""}. The advance is paid at pickup and refunded on return, minus any late or damage fees.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
