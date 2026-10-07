@@ -100,7 +100,7 @@ fun DashboardScreen(
     Scaffold { padding ->
         val stats = state.stats
         if (stats == null) { SkeletonList(modifier = Modifier.padding(padding)); return@Scaffold }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = 24.dp, start = 20.dp, end = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        LazyColumn(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()), contentPadding = PaddingValues(bottom = 24.dp, start = 20.dp, end = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item {
                 Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {

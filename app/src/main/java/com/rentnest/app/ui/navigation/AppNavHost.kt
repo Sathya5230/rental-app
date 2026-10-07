@@ -84,6 +84,7 @@ fun AppNavHost(navController: NavHostController, session: SessionState, modifier
                     HomeScreen(
                         onOpenItem = { nav.navigate(ItemDetailsRoute(it)) },
                         onOpenSearch = { nav.navigate(SearchRoute(it ?: -1L)) },
+                        onOpenProvider = { nav.navigate(SearchRoute(providerId = it)) },
                         onOpenNotifications = { nav.navigate(NotificationsRoute) },
                     )
                 }

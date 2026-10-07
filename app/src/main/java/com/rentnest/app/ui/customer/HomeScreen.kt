@@ -78,12 +78,13 @@ fun HomeScreen(
     onOpenItem: (Long) -> Unit,
     onOpenSearch: (Long?) -> Unit,
     onOpenNotifications: () -> Unit,
+    onOpenProvider: (Long) -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     Scaffold { padding ->
         if (state.loading) { SkeletonList(modifier = Modifier.padding(padding)); return@Scaffold }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        LazyColumn(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()), contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
             item {
                 Row(Modifier.padding(start = 20.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -129,13 +130,13 @@ fun HomeScreen(
             item {
                 SectionHeader("Top providers")
                 LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(state.topProviders, key = { it.id }) { p -> ProviderChip(p) }
+                    items(state.topProviders, key = { it.id }) { p -> ProviderChip(p) { onOpenProvider(p.id) } }
                 }
             }
             if (state.recent.isNotEmpty()) item {
                 SectionHeader("Recently viewed")
                 LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(state.recent, key = { it.item.id }) { s -> ItemCard(s, { onOpenItem(s.item.id) }, Modifier.width(160.dp)) }
+                    items(state.recent, key = { it.item.id }) { s -> ItemCard(s, { onOpenItem(s.item.id) }, Modifier.width(200.dp)) }
                 }
             }
         }
@@ -176,8 +177,8 @@ private fun CategoryTile(category: Category, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ProviderChip(p: Provider) {
-    Card(shape = MaterialTheme.shapes.medium, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+private fun ProviderChip(p: Provider, onClick: () -> Unit) {
+    Card(onClick = onClick, shape = MaterialTheme.shapes.medium, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Row(Modifier.padding(12.dp).width(200.dp), verticalAlignment = Alignment.CenterVertically) {
             Avatar(p.shopName)
             Spacer(Modifier.width(10.dp))

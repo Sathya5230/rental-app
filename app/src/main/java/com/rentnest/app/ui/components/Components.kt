@@ -64,7 +64,8 @@ fun ItemCard(
             Text(summary.providerName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                PriceText(summary.item.dailyRate, Modifier.weight(1f))
+                PriceText(summary.item.dailyRate)
+                Spacer(Modifier.weight(1f).widthIn(min = 6.dp))
                 RatingBadge(summary.rating)
             }
         }
@@ -94,6 +95,8 @@ fun PriceText(dailyRate: Long, modifier: Modifier = Modifier) {
             withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) { append(" /day") }
         },
         style = MaterialTheme.typography.bodyMedium,
+        maxLines = 1,
+        softWrap = false,
         modifier = modifier,
     )
 }

@@ -10,7 +10,7 @@ import kotlinx.serialization.Serializable
 
 // Customer
 @Serializable object HomeRoute
-@Serializable data class SearchRoute(val categoryId: Long = -1L)
+@Serializable data class SearchRoute(val categoryId: Long = -1L, val providerId: Long = -1L)
 @Serializable object RentalsRoute
 @Serializable object SavedRoute
 @Serializable data class ItemDetailsRoute(val itemId: Long)

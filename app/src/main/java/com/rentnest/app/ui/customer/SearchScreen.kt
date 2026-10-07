@@ -44,11 +44,12 @@ enum class SortOption(val label: String) { RELEVANCE("Popular"), PRICE_LOW("Pric
 
 data class SearchFilters(
     val categoryId: Long? = null,
+    val providerId: Long? = null,
     val maxPrice: Long? = null,
     val minRating: Double? = null,
     val dates: DateRange? = null,
 ) {
-    val activeCount: Int get() = listOfNotNull(categoryId, maxPrice, minRating, dates).size
+    val activeCount: Int get() = listOfNotNull(categoryId, providerId, maxPrice, minRating, dates).size
 }
 
 object SearchLogic {
@@ -58,6 +59,7 @@ object SearchLogic {
             val item = s.item
             (q.isEmpty() || listOf(item.title, item.description, s.categoryName, s.providerName).any { it.lowercase().contains(q) }) &&
                 (f.categoryId == null || item.categoryId == f.categoryId) &&
+                (f.providerId == null || item.providerId == f.providerId) &&
                 (f.maxPrice == null || item.dailyRate <= f.maxPrice) &&
                 (f.minRating == null || (s.rating?.average ?: 0.0) >= f.minRating) &&
                 (f.dates == null || AvailabilityCalculator.isBookable(f.dates, units[item.id].orEmpty(), bookings[item.id].orEmpty()))
@@ -79,6 +81,7 @@ data class SearchUiState(
     val filters: SearchFilters = SearchFilters(),
     val sort: SortOption = SortOption.RELEVANCE,
     val categories: List<Category> = emptyList(),
+    val providerName: String? = null,
     val results: List<ItemSummary> = emptyList(),
     val today: LocalDate = LocalDate.now(),
 )
@@ -92,14 +95,15 @@ class SearchViewModel @Inject constructor(
     private val catalog: CatalogRepository,
     time: TimeProvider,
 ) : ViewModel() {
-    private val initialCategory = savedState.toRoute<SearchRoute>().categoryId.takeIf { it > 0 }
+    private val route = savedState.toRoute<SearchRoute>()
+    private val initialCategory = route.categoryId.takeIf { it > 0 }
     private val query = MutableStateFlow("")
-    private val filters = MutableStateFlow(SearchFilters(categoryId = initialCategory))
+    private val filters = MutableStateFlow(SearchFilters(categoryId = initialCategory, providerId = route.providerId.takeIf { it > 0 }))
     private val sort = MutableStateFlow(SortOption.RELEVANCE)
     private val stock = combine(inventory.allUnits(), bookings.allBookings()) { u, b -> u.groupBy { it.itemId } to b.groupBy { it.itemId } }
 
     val state = combine(query, filters, sort, observeCatalog(), stock) { q, f, s, snap, (units, books) ->
-        SearchUiState(false, q, f, s, snap.categories, SearchLogic.filter(snap, q, f, s, units, books), time.today())
+        SearchUiState(false, q, f, s, snap.categories, f.providerId?.let { snap.providers[it]?.shopName }, SearchLogic.filter(snap, q, f, s, units, books), time.today())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SearchUiState())
 
     fun setQuery(q: String) { query.value = q }
@@ -143,6 +147,16 @@ fun SearchScreen(onOpenItem: (Long) -> Unit, viewModel: SearchViewModel = hiltVi
                 Spacer(Modifier.weight(1f))
                 Text("${state.results.size} results", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            state.providerName?.let { name ->
+                InputChip(
+                    selected = true,
+                    onClick = { viewModel.setFilters(state.filters.copy(providerId = null)) },
+                    label = { Text(name) },
+                    leadingIcon = { Icon(Icons.Rounded.Storefront, null, Modifier.size(18.dp)) },
+                    trailingIcon = { Icon(Icons.Rounded.Close, "Show all providers", Modifier.size(18.dp)) },
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
             if (!state.loading && state.results.isEmpty()) {
                 EmptyState(Icons.Rounded.SearchOff, "No gear matches", "Try a different word or loosen your filters.", actionLabel = "Clear filters", onAction = {
                     viewModel.setFilters(SearchFilters()); viewModel.setQuery("")
@@ -168,6 +182,7 @@ fun SearchScreen(onOpenItem: (Long) -> Unit, viewModel: SearchViewModel = hiltVi
 @Composable
 private fun FilterSheet(state: SearchUiState, onDismiss: () -> Unit, onApply: (SearchFilters) -> Unit) {
     var draft by remember { mutableStateOf(state.filters) }
+    val providerId = state.filters.providerId
     var pickDates by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 20.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -190,7 +205,7 @@ private fun FilterSheet(state: SearchUiState, onDismiss: () -> Unit, onApply: (S
                 Text(draft.dates?.let { DateFormats.range(it) } ?: "Any dates")
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = { draft = SearchFilters() }, Modifier.weight(1f), shape = MaterialTheme.shapes.small) { Text("Reset") }
+                OutlinedButton(onClick = { draft = SearchFilters(providerId = providerId) }, Modifier.weight(1f), shape = MaterialTheme.shapes.small) { Text("Reset") }
                 Button(onClick = { onApply(draft) }, Modifier.weight(1f), shape = MaterialTheme.shapes.small) { Text("Show results") }
             }
             Spacer(Modifier.height(24.dp))
