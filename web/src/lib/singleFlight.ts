@@ -2,13 +2,13 @@ import type { Outcome } from '@/domain/errors';
 
 /**
  * Wraps an action so repeat calls while it runs, or after it succeeded, get the first call's result
- * instead of running again. A failed run can be retried.
+ * instead of running again. A failed run can be retried. Arguments of repeat calls are ignored.
  */
-export function singleFlight<T>(fn: () => Promise<Outcome<T>>): () => Promise<Outcome<T>> {
+export function singleFlight<A extends unknown[], T>(fn: (...args: A) => Promise<Outcome<T>>): (...args: A) => Promise<Outcome<T>> {
   let pending: Promise<Outcome<T>> | null = null;
-  return () => {
+  return (...args: A) => {
     if (pending) return pending;
-    pending = fn().then(
+    pending = fn(...args).then(
       r => { if (!r.ok) pending = null; return r; },
       e => { pending = null; throw e; },
     );
